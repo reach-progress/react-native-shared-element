@@ -8,15 +8,6 @@ Major changes in this fork:
 - Updated transition and node management for newer React Native releases.
 - Expanded the JS entry points around the native transition view to support the new runtime behavior.
 
-# react-native-shared-element <!-- omit in toc -->
-
-Native shared element transition _"primitives"_ for react-native 💫
-
-This library in itself is not a Navigation- or Router library. Instead, it provides a set of comprehensive full native building blocks for performing shared element transitions in Router- or Transition libraries. If you are looking [for the React Navigation binding, you can find it here](https://github.com/IjzerenHein/react-navigation-shared-element).
-
-![MagicMoveGif-iOS](set-ios.gif)
-![MagicMoveGif-Android](set-android.gif)
-
 ## Local development with Reach frontend
 
 For Reach Progress app development, keep these repositories as siblings:
@@ -48,6 +39,15 @@ pnpm install
 ```
 
 The helper script lives at `frontend/scripts/shared-element-deps.mjs`. By default it assumes these repos are siblings of `frontend`, but you can override that with `REACT_NATIVE_SHARED_ELEMENT_PATH` and `REACT_NAVIGATION_SHARED_ELEMENT_PATH`.
+
+# react-native-shared-element <!-- omit in toc -->
+
+Native shared element transition _"primitives"_ for react-native 💫
+
+This library in itself is not a Navigation- or Router library. Instead, it provides a set of comprehensive full native building blocks for performing shared element transitions in Router- or Transition libraries. If you are looking [for the React Navigation binding, you can find it here](https://github.com/IjzerenHein/react-navigation-shared-element).
+
+![MagicMoveGif-iOS](set-ios.gif)
+![MagicMoveGif-Android](set-android.gif)
 
 ## Motivation
 
