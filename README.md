@@ -17,6 +17,38 @@ This library in itself is not a Navigation- or Router library. Instead, it provi
 ![MagicMoveGif-iOS](set-ios.gif)
 ![MagicMoveGif-Android](set-android.gif)
 
+## Local development with Reach frontend
+
+For Reach Progress app development, keep these repositories as siblings:
+
+```text
+code/
+  frontend/
+  react-native-shared-element/
+  react-navigation-shared-element/
+```
+
+From `frontend`, switch the app to the local checkouts with:
+
+```bash
+pnpm shared-elements:use-local
+pnpm install
+```
+
+That rewrites the frontend app dependencies to `file:../react-native-shared-element` and `file:../react-navigation-shared-element`.
+
+After native code changes in either shared-element package, rebuild the app from `frontend` with `pnpm ios` or `pnpm android`.
+
+When you want tarball snapshots instead of live local paths:
+
+```bash
+pnpm shared-elements:tar
+pnpm shared-elements:use-tar
+pnpm install
+```
+
+The helper script lives at `frontend/scripts/shared-element-deps.mjs`. By default it assumes these repos are siblings of `frontend`, but you can override that with `REACT_NATIVE_SHARED_ELEMENT_PATH` and `REACT_NAVIGATION_SHARED_ELEMENT_PATH`.
+
 ## Motivation
 
 Shared-element transitions add **shine** to your app but can be hard to do in practise.
@@ -36,6 +68,7 @@ This library solves that problem through an all native implementation which is v
 
 ## Index <!-- omit in toc -->
 
+- [Local development with Reach frontend](#local-development-with-reach-frontend)
 - [Motivation](#motivation)
 - [Under development](#under-development)
 - [Installation](#installation)
@@ -228,4 +261,3 @@ Both [react-native-shared-element](https://github.com/IjzerenHein/react-native-s
 It is no longer possible for me (@author) to maintain these repositories. Please reach out to [me personally](mailto:hrutjes@gmail.com) if you have ideas or suggestions.
 
 > Read the [full statement here](https://github.com/IjzerenHein/react-navigation-shared-element/issues/14#issuecomment-1081601310).
-
