@@ -18,7 +18,7 @@ type PropsType = {
     node: RNSharedElementNodeConfig | null;
     ancestor: RNSharedElementNodeConfig | null;
   };
-  nodePosition: number | any;
+  nodePosition?: number | any;
   animation: RNSharedElementAnimation;
   resize: RNSharedElementResize;
   align: RNSharedElementAlign;
@@ -42,7 +42,7 @@ export class RNSharedElementTransitionView extends React.Component<
     const { transition } = state;
     transition.setNode(false, startNode.node, startNode.ancestor);
     transition.setNode(true, endNode.node, endNode.ancestor);
-    transition.nodePosition = nodePosition;
+    transition.nodePosition = nodePosition ?? 0;
     transition.animation = animation;
     transition.resize = resize;
     transition.align = align;

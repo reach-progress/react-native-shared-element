@@ -6,6 +6,8 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <CoreImage/CoreImage.h>
+#import <QuartzCore/QuartzCore.h>
+#import <math.h>
 #import <React/RCTDefines.h>
 #import <React/UIView+React.h>
 #import "RNSharedElementTransition.h"
@@ -16,11 +18,20 @@
 #define ITEM_START 2
 #define ITEM_END 3
 
-#ifdef DEBUG
-#define DebugLog(...) NSLog(__VA_ARGS__)
-#else
 #define DebugLog(...) (void)0
-#endif
+
+// Native CADisplayLink animation used for Fabric interop when JS-driven
+// Animated values do not update JS-side state. Fixed duration; eased to
+// feel closer to UIKit transitions.
+//
+// NOTE: This path intentionally avoids per-frame logging for perf.
+// Cubic ease-out to slow as the transition approaches the end.
+static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
+{
+  const CGFloat clamped = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+  const CGFloat inv = 1.0f - clamped;
+  return 1.0f - (inv * inv * inv);
+}
 
 @implementation RNSharedElementTransition
 {
@@ -32,6 +43,131 @@
   BOOL _reactFrameSet;
   BOOL _initialLayoutPassCompleted;
   int _initialVisibleAncestorIndex;
+  // CADisplayLink-driven animation state (Fabric interop path).
+  CADisplayLink* _displayLink;
+  CFTimeInterval _nativeStartTime;
+  CGFloat _nativeFrom;
+  CGFloat _nativeTo;
+  CGFloat _nativeDuration;
+  CGFloat _nativeDelay;
+  BOOL _nativeAnimating;
+  BOOL _nativeAnimationPending;
+}
+
+- (void)startNativeAnimationIfReady:(NSString*)reason
+{
+  // Drive nodePosition natively once layout/content is ready.
+  if (!_nativeDriver) return;
+  if (!_nativeAnimationPending) return;
+  if (!_initialLayoutPassCompleted) {
+    DebugLog(@"RNSharedElementTransition: native anim pending (init) %@", reason);
+    return;
+  }
+  // A zero duration is treated as no-op to avoid a zero-length loop.
+  if (_nativeDuration <= 0) {
+    DebugLog(@"RNSharedElementTransition: native anim skipped (duration=0) %@", reason);
+    _nativeAnimationPending = NO;
+    return;
+  }
+  if (_nativeAnimating) return;
+
+  _nativeAnimating = YES;
+  _nativeAnimationPending = NO;
+
+  const CFTimeInterval now = CACurrentMediaTime();
+  const CFTimeInterval delaySeconds = _nativeDelay / 1000.0;
+  // Delay is in ms from JS, convert to seconds for CoreAnimation clock.
+  _nativeStartTime = now + delaySeconds;
+
+  if (!isfinite(_nativeFrom)) _nativeFrom = _nodePosition;
+  if (!isfinite(_nativeTo)) _nativeTo = 1.0f;
+
+  DebugLog(@"RNSharedElementTransition: native anim start (reason=%@, from=%f, to=%f, duration=%f, delay=%f)",
+           reason,
+           _nativeFrom,
+           _nativeTo,
+           _nativeDuration,
+           _nativeDelay);
+
+  if (_displayLink == nil) {
+    // Use the main run loop so updates align with UIKit rendering.
+    _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(onDisplayLink:)];
+    [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+  }
+}
+
+- (void)stopNativeAnimation:(NSString*)reason
+{
+  // Cleanly tear down the display link to avoid leaks or stray updates.
+  if (!_nativeAnimating) return;
+  _nativeAnimating = NO;
+  if (_displayLink != nil) {
+    [_displayLink invalidate];
+    _displayLink = nil;
+  }
+  DebugLog(@"RNSharedElementTransition: native anim stop (%@)", reason);
+}
+
+- (void)onDisplayLink:(CADisplayLink*)displayLink
+{
+  if (!_nativeAnimating) return;
+  const CFTimeInterval now = CACurrentMediaTime();
+  if (now < _nativeStartTime) return;
+
+  const CFTimeInterval elapsed = now - _nativeStartTime;
+  const CFTimeInterval durationSeconds = _nativeDuration / 1000.0;
+  // Fixed-duration easing: ease-out to mimic UIKit-ish deceleration.
+  const CGFloat t = durationSeconds > 0 ? MIN(1.0, (CGFloat)(elapsed / durationSeconds)) : 1.0f;
+  const CGFloat eased = RNSharedElementEaseOutCubic(t);
+  const CGFloat value = _nativeFrom + ((_nativeTo - _nativeFrom) * eased);
+
+  if (_nodePosition != value) {
+    _nodePosition = value;
+    [self updateStyle];
+    [self updateNodeVisibility];
+  }
+
+  if (t >= 1.0f) {
+    [self stopNativeAnimation:@"complete"];
+  }
+}
+
+- (void)startTransitionIfNeeded:(NSString*)reason
+{
+  // In Fabric interop, layoutSubviews can arrive with zero-sized bounds.
+  // Use superview bounds as a fallback to decide when to bootstrap.
+  if (_reactFrameSet) return;
+  CGRect selfBounds = self.bounds;
+  CGRect superBounds = self.superview ? self.superview.bounds : CGRectZero;
+  if (CGRectIsEmpty(selfBounds) && CGRectIsEmpty(superBounds)) {
+    DebugLog(@"RNSharedElementTransition: skip bootstrap (%@), bounds=%@ super=%@",
+             reason,
+             NSStringFromCGRect(selfBounds),
+             NSStringFromCGRect(superBounds));
+    return;
+  }
+  _reactFrameSet = YES;
+  DebugLog(@"RNSharedElementTransition: bootstrap (%@), bounds=%@ super=%@",
+           reason,
+           NSStringFromCGRect(selfBounds),
+           NSStringFromCGRect(superBounds));
+  // Defer to next run loop so React layout/content requests are ready.
+  dispatch_async(dispatch_get_main_queue(), ^{
+    for (RNSharedElementTransitionItem* item in self->_items) {
+      if (item.needsLayout) {
+        item.needsLayout = NO;
+        [item.node requestStyle:self];
+      }
+      if (item.needsContent) {
+        item.needsContent = NO;
+        [item.node requestContent:self];
+      }
+    }
+    self->_initialLayoutPassCompleted = YES;
+    [self updateStyle];
+    [self updateNodeVisibility];
+    [self startNativeAnimationIfReady:@"bootstrap"];
+  });
 }
 
 - (instancetype)initWithNodeManager:(RNSharedElementNodeManager*)nodeManager
@@ -50,6 +186,13 @@
     _reactFrameSet = NO;
     _initialLayoutPassCompleted = NO;
     _initialVisibleAncestorIndex = -1;
+    _nativeDriver = NO;
+    _nativeDuration = 0.0f;
+    _nativeDelay = 0.0f;
+    _nativeFrom = NAN;
+    _nativeTo = NAN;
+    _nativeAnimating = NO;
+    _nativeAnimationPending = NO;
     self.userInteractionEnabled = NO;
     
     _outerStyleView = [[UIImageView alloc]init];
@@ -73,14 +216,25 @@
 - (void)removeFromSuperview
 {
   [super removeFromSuperview];
+  // Ensure display link stops if the transition view is removed.
+  [self stopNativeAnimation:@"removeFromSuperview"];
   
   for (RNSharedElementTransitionItem* item in _items) {
     if (item.node != nil) [item.node cancelRequests:self];
   }
 }
 
+- (void)layoutSubviews
+{
+  [super layoutSubviews];
+  // Bootstrap in layoutSubviews to match Fabric interop render timing.
+  [self startTransitionIfNeeded:@"layoutSubviews"];
+}
+
 - (void)dealloc
 {
+  // Defensive cleanup to avoid display link retaining this view.
+  [self stopNativeAnimation:@"dealloc"];
   for (RNSharedElementTransitionItem* item in _items) {
     item.node = nil;
   }
@@ -108,26 +262,58 @@
 - (void)setStartNode:(RNSharedElementNode *)startNode
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_START]).node = startNode;
+  DebugLog(@"RNSharedElementTransition: setStartNode reactTag=%@ isParent=%@",
+           startNode ? startNode.reactTag : nil,
+           startNode ? (startNode.isParent ? @"YES" : @"NO") : nil);
+  // Native animation can only start once both nodes/ancestors resolve.
+  _nativeAnimationPending = _nativeDriver;
+  [self startNativeAnimationIfReady:@"startNode"];
 }
 
 - (void)setEndNode:(RNSharedElementNode *)endNode
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_END]).node = endNode;
+  DebugLog(@"RNSharedElementTransition: setEndNode reactTag=%@ isParent=%@",
+           endNode ? endNode.reactTag : nil,
+           endNode ? (endNode.isParent ? @"YES" : @"NO") : nil);
+  // Native animation can only start once both nodes/ancestors resolve.
+  _nativeAnimationPending = _nativeDriver;
+  [self startNativeAnimationIfReady:@"endNode"];
 }
 
 - (void)setStartAncestor:(RNSharedElementNode *)startNodeAncestor
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_START_ANCESTOR]).node = startNodeAncestor;
+  DebugLog(@"RNSharedElementTransition: setStartAncestor reactTag=%@ isParent=%@",
+           startNodeAncestor ? startNodeAncestor.reactTag : nil,
+           startNodeAncestor ? (startNodeAncestor.isParent ? @"YES" : @"NO") : nil);
+  // Ancestor resolution can happen later than nodes in Fabric interop.
+  _nativeAnimationPending = _nativeDriver;
+  [self startNativeAnimationIfReady:@"startAncestor"];
 }
 
 - (void)setEndAncestor:(RNSharedElementNode *)endNodeAncestor
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_END_ANCESTOR]).node = endNodeAncestor;
+  DebugLog(@"RNSharedElementTransition: setEndAncestor reactTag=%@ isParent=%@",
+           endNodeAncestor ? endNodeAncestor.reactTag : nil,
+           endNodeAncestor ? (endNodeAncestor.isParent ? @"YES" : @"NO") : nil);
+  // Ancestor resolution can happen later than nodes in Fabric interop.
+  _nativeAnimationPending = _nativeDriver;
+  [self startNativeAnimationIfReady:@"endAncestor"];
 }
 
 - (void)setNodePosition:(CGFloat)nodePosition
 {
   if (_nodePosition != nodePosition) {
+    // Ignore JS updates while native driver is active to avoid contention.
+    if (_nativeAnimating && _nativeDriver) {
+      return;
+    }
+    // If a non-native update arrives, stop the CADisplayLink to avoid conflict.
+    if (_nativeAnimating) {
+      [self stopNativeAnimation:@"nodePosition set"];
+    }
     _nodePosition = nodePosition;
     [self updateStyle];
   }
@@ -157,6 +343,56 @@
   }
 }
 
+- (void)setNativeDriver:(BOOL)nativeDriver
+{
+  if (_nativeDriver != nativeDriver) {
+    _nativeDriver = nativeDriver;
+    // When enabled, queue a native animation once props+layout are ready.
+    _nativeAnimationPending = _nativeDriver;
+    [self startNativeAnimationIfReady:@"nativeDriver"];
+  }
+}
+
+- (void)setNativeDuration:(CGFloat)nativeDuration
+{
+  if (_nativeDuration != nativeDuration) {
+    _nativeDuration = nativeDuration;
+    // Duration changes should restart the pending native animation.
+    _nativeAnimationPending = _nativeDriver;
+    [self startNativeAnimationIfReady:@"nativeDuration"];
+  }
+}
+
+- (void)setNativeDelay:(CGFloat)nativeDelay
+{
+  if (_nativeDelay != nativeDelay) {
+    _nativeDelay = nativeDelay;
+    // Delay changes should restart the pending native animation.
+    _nativeAnimationPending = _nativeDriver;
+    [self startNativeAnimationIfReady:@"nativeDelay"];
+  }
+}
+
+- (void)setNativeFrom:(CGFloat)nativeFrom
+{
+  if (_nativeFrom != nativeFrom) {
+    _nativeFrom = nativeFrom;
+    // From/to changes should restart the pending native animation.
+    _nativeAnimationPending = _nativeDriver;
+    [self startNativeAnimationIfReady:@"nativeFrom"];
+  }
+}
+
+- (void)setNativeTo:(CGFloat)nativeTo
+{
+  if (_nativeTo != nativeTo) {
+    _nativeTo = nativeTo;
+    // From/to changes should restart the pending native animation.
+    _nativeAnimationPending = _nativeDriver;
+    [self startNativeAnimationIfReady:@"nativeTo"];
+  }
+}
+
 - (void)updateNodeVisibility
 {
   for (RNSharedElementTransitionItem* item in _items) {
@@ -169,6 +405,7 @@
 
 - (void) didSetProps:(NSArray<NSString *> *)changedProps
 {
+  [self startTransitionIfNeeded:@"didSetProps"];
   for (RNSharedElementTransitionItem* item in _items) {
     if (_initialLayoutPassCompleted && item.needsLayout) {
       item.needsLayout = NO;
@@ -649,25 +886,8 @@
   // Only after the frame bounds have been set by the RN layout-system
   // we schedule a layout-fetch to run after these updates to ensure
   // that Yoga/UIManager has finished the initial layout pass.
-  if (_reactFrameSet == NO) {
-    //NSLog(@"reactSetFrame: %@", NSStringFromCGRect(frame));
-    _reactFrameSet = YES;
-    dispatch_async(dispatch_get_main_queue(), ^{
-      for (RNSharedElementTransitionItem* item in self->_items) {
-        if (item.needsLayout) {
-          item.needsLayout = NO;
-          [item.node requestStyle:self];
-        }
-        if (item.needsContent) {
-          item.needsContent = NO;
-          [item.node requestContent:self];
-        }
-      }
-      self->_initialLayoutPassCompleted = YES;
-      [self updateStyle];
-      [self updateNodeVisibility];
-    });
-  }
+  //NSLog(@"reactSetFrame: %@", NSStringFromCGRect(frame));
+  [self startTransitionIfNeeded:@"reactSetFrame"];
   
   // When react attempts to change the frame on this view,
   // override that and apply our own measured frame and styles

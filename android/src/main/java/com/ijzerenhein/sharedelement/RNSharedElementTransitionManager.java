@@ -3,6 +3,7 @@ package com.ijzerenhein.sharedelement;
 import java.util.Map;
 
 import android.view.View;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -13,9 +14,18 @@ import com.facebook.react.uimanager.ThemedReactContext;
 import com.facebook.react.uimanager.SimpleViewManager;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.ReactApplicationContext;
+import com.facebook.react.bridge.UIManager;
+import com.facebook.react.fabric.FabricUIManager;
+import com.facebook.react.uimanager.UIManagerHelper;
 
 public class RNSharedElementTransitionManager extends SimpleViewManager<RNSharedElementTransition> {
   public static final String REACT_CLASS = "RNSharedElementTransition";
+  private static final String LOG_TAG = "RNSharedElementTransitionManager";
+  private static final boolean DEBUG = false;
+
+  private static void log(String message) {
+    if (DEBUG) Log.d(LOG_TAG, message);
+  }
 
   public RNSharedElementTransitionManager(ReactApplicationContext reactContext) {
     super();
@@ -72,19 +82,89 @@ public class RNSharedElementTransitionManager extends SimpleViewManager<RNShared
     view.setAlign(RNSharedElementAlign.values()[align]);
   }
 
+  // Native-timer props for Fabric interop path.
+  @ReactProp(name = "nativeDriver")
+  public void setNativeDriver(final RNSharedElementTransition view, final boolean nativeDriver) {
+    view.setNativeDriver(nativeDriver);
+  }
+
+  @ReactProp(name = "nativeDuration")
+  public void setNativeDuration(final RNSharedElementTransition view, final float nativeDuration) {
+    view.setNativeDuration(nativeDuration);
+  }
+
+  @ReactProp(name = "nativeDelay")
+  public void setNativeDelay(final RNSharedElementTransition view, final float nativeDelay) {
+    view.setNativeDelay(nativeDelay);
+  }
+
+  @ReactProp(name = "nativeFrom")
+  public void setNativeFrom(final RNSharedElementTransition view, final float nativeFrom) {
+    view.setNativeFrom(nativeFrom);
+  }
+
+  @ReactProp(name = "nativeTo")
+  public void setNativeTo(final RNSharedElementTransition view, final float nativeTo) {
+    view.setNativeTo(nativeTo);
+  }
+
   private void setViewItem(final RNSharedElementTransition view, RNSharedElementTransition.Item item, final ReadableMap map) {
-    if (map == null) return;
-    if (!map.hasKey("node") || !map.hasKey("ancestor")) return;
+    if (map == null) {
+      log("setViewItem " + item + " map=null -> clear node");
+      view.setItemNode(item, null);
+      return;
+    }
+    if (!map.hasKey("node") || map.isNull("node")) {
+      log("setViewItem " + item + " missing node -> clear node");
+      view.setItemNode(item, null);
+      return;
+    }
     final ReadableMap nodeMap = map.getMap("node");
-    final ReadableMap ancestorMap = map.getMap("ancestor");
+    final ReadableMap ancestorMap = map.hasKey("ancestor") ? map.getMap("ancestor") : null;
+    if (nodeMap == null) {
+      log("setViewItem " + item + " nodeMap=null -> clear node");
+      view.setItemNode(item, null);
+      return;
+    }
+    if (!nodeMap.hasKey("nodeHandle")) {
+      log("setViewItem " + item + " missing nodeHandle -> clear node");
+      view.setItemNode(item, null);
+      return;
+    }
     int nodeHandle = nodeMap.getInt("nodeHandle");
-    int ancestorHandle = ancestorMap.getInt("nodeHandle");
-    boolean isParent = nodeMap.getBoolean("isParent");
+    int ancestorHandle = ancestorMap != null && ancestorMap.hasKey("nodeHandle")
+      ? ancestorMap.getInt("nodeHandle")
+      : nodeHandle;
+    boolean isParent = nodeMap.hasKey("isParent") && nodeMap.getBoolean("isParent");
     ReadableMap styleConfig = nodeMap.getMap("nodeStyle");
-    View nodeView = view.getNodeManager().getNativeViewHierarchyManager().resolveView(nodeHandle);
-    View ancestorView = view.getNodeManager().getNativeViewHierarchyManager().resolveView(ancestorHandle);
-    RNSharedElementNode node = view.getNodeManager().acquire(nodeHandle, nodeView, isParent, ancestorView, styleConfig);
-    view.setItemNode(item, node);
+    try {
+      View nodeView = null;
+      View ancestorView = null;
+      ThemedReactContext themedContext = (ThemedReactContext) view.getContext();
+      UIManager uiManager = UIManagerHelper.getUIManagerForReactTag(themedContext, nodeHandle);
+      if (uiManager instanceof FabricUIManager) {
+        FabricUIManager fabricUIManager = (FabricUIManager) uiManager;
+        nodeView = fabricUIManager.resolveView(nodeHandle);
+        ancestorView = fabricUIManager.resolveView(ancestorHandle);
+      } else {
+        log("setViewItem " + item + " Fabric UIManager unavailable for node=" + nodeHandle + " ancestor=" + ancestorHandle);
+      }
+      if (nodeView == null) {
+        log("setViewItem " + item + " resolve nodeView failed handle=" + nodeHandle);
+        view.setItemNode(item, null);
+        return;
+      }
+      if (ancestorView == null) {
+        log("setViewItem " + item + " resolve ancestor failed handle=" + ancestorHandle + " (fallback to node)");
+        ancestorView = nodeView;
+      }
+      log("setViewItem " + item + " node=" + nodeHandle + " ancestor=" + ancestorHandle + " isParent=" + isParent);
+      RNSharedElementNode node = view.getNodeManager().acquire(nodeHandle, nodeView, isParent, ancestorView, styleConfig);
+      view.setItemNode(item, node);
+    } catch (Exception e) {
+      log("setViewItem " + item + " error=" + e.getMessage());
+      view.setItemNode(item, null);
+    }
   }
 
   @ReactProp(name = "startNode")

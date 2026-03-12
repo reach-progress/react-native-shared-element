@@ -74,7 +74,7 @@ static CGFloat RNSharedElementDefaultIfNegativeTo(CGFloat defaultValue, CGFloat 
   } else {
     CAShapeLayer *shapeLayer = [CAShapeLayer layer];
     RCTCornerInsets cornerInsets = RCTGetCornerInsets(radii, UIEdgeInsetsZero);
-    CGPathRef path = RCTPathCreateWithRoundedRect(bounds, cornerInsets, NULL);
+    CGPathRef path = RCTPathCreateWithRoundedRect(bounds, cornerInsets, NULL, NO);
     shapeLayer.path = path;
     CGPathRelease(path);
     mask = shapeLayer;
@@ -95,7 +95,7 @@ static CGFloat RNSharedElementDefaultIfNegativeTo(CGFloat defaultValue, CGFloat 
   }
   
   RCTCornerInsets cornerInsets = RCTGetCornerInsets(radii, UIEdgeInsetsZero);
-  CGPathRef path = RCTPathCreateWithRoundedRect(bounds, cornerInsets, NULL);
+  CGPathRef path = RCTPathCreateWithRoundedRect(bounds, cornerInsets, NULL, NO);
   layer.shadowPath = path;
   CGPathRelease(path);
 }

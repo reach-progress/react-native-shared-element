@@ -15,7 +15,7 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      },
+      }
     },
     "ios": {
       "bundleIdentifier": "nl.ijzerenhein.SharedElementExample"
@@ -29,7 +29,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
-    ],
+      ],
+      "expo-image"
+    ]
   }
 }

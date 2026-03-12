@@ -6,6 +6,8 @@
 #import <UIKit/UIKit.h>
 #import "RNSharedElementNodeManager.h"
 
+#define DebugLog(...) (void)0
+
 @implementation RNSharedElementNodeManager
 {
   NSMutableDictionary* _items;
@@ -24,10 +26,17 @@
     RNSharedElementNode* node = [_items objectForKey:reactTag];
     if (node != nil) {
       node.refCount = node.refCount + 1;
+      DebugLog(@"RNSharedElementNodeManager: acquire existing reactTag=%@ refCount=%ld",
+               reactTag,
+               node.refCount);
       return node;
     }
     node = [[RNSharedElementNode alloc]init:reactTag view:view isParent:isParent];
     [_items setObject:node forKey:reactTag];
+    DebugLog(@"RNSharedElementNodeManager: acquire new reactTag=%@ isParent=%@ view=%@",
+             reactTag,
+             isParent ? @"YES" : @"NO",
+             view ? @"YES" : @"NO");
     return node;
   }
 }
@@ -43,6 +52,9 @@
         [_items removeObjectForKey:node.reactTag];
       }
     }
+    DebugLog(@"RNSharedElementNodeManager: release reactTag=%@ refCount=%ld",
+             node.reactTag,
+             node.refCount);
     return node.refCount;
   }
 }

@@ -1,3 +1,13 @@
+# Reach Progress Fork <!-- omit in toc -->
+
+This repository is a Reach Progress fork of [IjzerenHein/react-native-shared-element](https://github.com/IjzerenHein/react-native-shared-element). It has been updated to work with React Native's New Architecture and interop layer.
+
+Major changes in this fork:
+
+- Added New Architecture and interop compatibility in the native iOS and Android transition layers.
+- Updated transition and node management for newer React Native releases.
+- Expanded the JS entry points around the native transition view to support the new runtime behavior.
+
 # react-native-shared-element <!-- omit in toc -->
 
 Native shared element transition _"primitives"_ for react-native 💫
@@ -218,5 +228,4 @@ Both [react-native-shared-element](https://github.com/IjzerenHein/react-native-s
 It is no longer possible for me (@author) to maintain these repositories. Please reach out to [me personally](mailto:hrutjes@gmail.com) if you have ideas or suggestions.
 
 > Read the [full statement here](https://github.com/IjzerenHein/react-navigation-shared-element/issues/14#issuecomment-1081601310).
-
 

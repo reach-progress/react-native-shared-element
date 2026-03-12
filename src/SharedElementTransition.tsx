@@ -46,21 +46,46 @@ export type SharedElementOnMeasureEvent = {
 };
 
 export type SharedElementTransitionProps = {
+  /** Start node/ancestor for the shared element transition. */
   start: {
+    /** Start node to snapshot and animate from. */
     node: SharedElementNode | null;
+    /** Ancestor for coordinate normalization and transform compensation. */
     ancestor: SharedElementNode | null;
   };
+  /** End node/ancestor for the shared element transition. */
   end: {
+    /** End node to snapshot and animate to. */
     node: SharedElementNode | null;
+    /** Ancestor for coordinate normalization and transform compensation. */
     ancestor: SharedElementNode | null;
   };
-  position: number | any | void;
+  /** High-level animation type (move, fade, fade-in, fade-out). */
   animation: SharedElementAnimation;
+  /** Resize behavior for the shared element content. */
   resize?: SharedElementResize;
+  /** Alignment behavior for the shared element content. */
   align?: SharedElementAlign;
+  /**
+   * Fabric interop path: when true, native code drives progress on the
+   * native thread using CADisplayLink (fixed duration).
+   */
+  nativeDriver?: boolean;
+  /** Native duration in milliseconds for the CADisplayLink-driven path. */
+  nativeDuration?: number;
+  /** Native delay in milliseconds before starting the CADisplayLink path. */
+  nativeDelay?: number;
+  /** Optional native start progress value (defaults to current position). */
+  nativeFrom?: number;
+  /** Optional native end progress value (defaults to 1.0). */
+  nativeTo?: number;
+  /** Enable debug overlays and boundary visuals. */
   debug?: boolean;
+  /** Additional style applied to the transition view. */
   style?: any;
+  /** Measure callback for debugging and instrumentation. */
   onMeasure?: (event: SharedElementOnMeasureEvent) => void;
+  /** Override the native transition component (advanced usage). */
   SharedElementComponent?: any;
 };
 
@@ -201,16 +226,16 @@ export class SharedElementTransition extends React.Component<
     }
   };
 
-  renderDebugOverlay() {
+  renderDebugOverlay(): React.ReactNode {
     if (!this.props.debug) {
-      return;
+      return null;
     }
     return <View style={debugStyles.overlay} />;
   }
 
-  renderDebugLayer(name: SharedElementNodeType) {
+  renderDebugLayer(name: SharedElementNodeType): React.ReactNode {
     const event = this.state[name];
-    if (!event || !this.props.debug) return;
+    if (!event || !this.props.debug) return null;
     const { layout, style } = event;
     const isContentDifferent =
       layout.x !== layout.contentX ||
@@ -298,7 +323,6 @@ export class SharedElementTransition extends React.Component<
       SharedElementComponent,
       start,
       end,
-      position,
       animation,
       resize,
       align,
@@ -321,12 +345,13 @@ export class SharedElementTransition extends React.Component<
             node: SharedElementTransition.prepareNode(end.node),
             ancestor: SharedElementTransition.prepareNode(end.ancestor),
           }}
-          nodePosition={position}
+          style={StyleSheet.absoluteFill}
           animation={NativeAnimationType.get(animation)}
           // @ts-ignore
           resize={NativeResizeType.get(resize)}
           // @ts-ignore
           align={NativeAlignType.get(align)}
+          nativeDriver={true}
           onMeasureNode={debug ? this.onMeasureNode : onMeasure}
           // style={debug && style ? [debugStyles.content, style] : style}
           {...otherProps}
