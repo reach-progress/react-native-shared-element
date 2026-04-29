@@ -631,16 +631,37 @@ public class RNSharedElementTransition extends ViewGroup {
     RectF endClippedLayout = RNSharedElementStyle.normalizeLayout(endCompensate, (endStyle != null) ? endItem.getClippedLayout() : RNSharedElementStyle.EMPTY_RECTF, endStyle, mParentOffset);
     RectF endClipInsets = getClipInsets(endLayout, endClippedLayout);
 
+    RectF startContentLayout = ((startStyle != null) && (startContent != null))
+            ? RNSharedElementStyle.normalizeLayout(
+                    startCompensate,
+                    RNSharedElementContent.getLayout(startLayout, startContent.size, startStyle.scaleType, false),
+                    startStyle,
+                    mParentOffset
+            )
+            : RNSharedElementStyle.EMPTY_RECTF;
+    RNSharedElementContent endContentForLayout = (endContent != null) ? endContent : startContent;
+    RectF endContentLayout = ((endStyle != null) && (endContentForLayout != null))
+            ? RNSharedElementStyle.normalizeLayout(
+                    endCompensate,
+                    RNSharedElementContent.getLayout(endLayout, endContentForLayout.size, endStyle.scaleType, false),
+                    endStyle,
+                    mParentOffset
+            )
+            : RNSharedElementStyle.EMPTY_RECTF;
+
     // Get interpolated layout
     RectF interpolatedLayout;
+    RectF interpolatedContentLayout;
     RectF interpolatedClipInsets;
     RNSharedElementStyle interpolatedStyle;
     if ((startStyle != null) && (endStyle != null)) {
       interpolatedLayout = RNSharedElementStyle.getInterpolatedLayout(startLayout, endLayout, mNodePosition);
+      interpolatedContentLayout = RNSharedElementStyle.getInterpolatedLayout(startContentLayout, endContentLayout, mNodePosition);
       interpolatedClipInsets = getInterpolatedClipInsets(interpolatedLayout, startClipInsets, startClippedLayout, endClipInsets, endClippedLayout, mNodePosition);
       interpolatedStyle = RNSharedElementStyle.getInterpolatedStyle(startStyle, startLayout, endStyle, endLayout, mNodePosition);
     } else if (startStyle != null) {
       interpolatedLayout = startLayout;
+      interpolatedContentLayout = startContentLayout;
       interpolatedStyle = startStyle;
       interpolatedClipInsets = startClipInsets;
     } else {
@@ -649,6 +670,7 @@ public class RNSharedElementTransition extends ViewGroup {
         mInitialNodePositionSet = true;
       }
       interpolatedLayout = endLayout;
+      interpolatedContentLayout = endContentLayout;
       interpolatedStyle = endStyle;
       interpolatedClipInsets = endClipInsets;
     }
@@ -661,6 +683,9 @@ public class RNSharedElementTransition extends ViewGroup {
       parentLayout.top += interpolatedClipInsets.top;
       parentLayout.right -= interpolatedClipInsets.right;
       parentLayout.bottom -= interpolatedClipInsets.bottom;
+      mRequiresClipping = true;
+    } else if (mResize == RNSharedElementResize.CLIP) {
+      parentLayout = new RectF(interpolatedLayout);
       mRequiresClipping = true;
     } else {
       parentLayout = new RectF(startLayout);
@@ -706,10 +731,13 @@ public class RNSharedElementTransition extends ViewGroup {
 
     // Render the start view
     if (mAnimation != RNSharedElementAnimation.FADE_IN) {
+      RectF startRenderLayout = mResize == RNSharedElementResize.CLIP
+              ? interpolatedContentLayout
+              : interpolatedLayout;
       mStartView.updateViewAndDrawable(
-              interpolatedLayout,
+              startRenderLayout,
               parentLayout,
-              startLayout,
+              mResize == RNSharedElementResize.CLIP ? startContentLayout : startLayout,
               startFrame,
               startContent,
               interpolatedStyle,
@@ -725,10 +753,13 @@ public class RNSharedElementTransition extends ViewGroup {
             || (mAnimation == RNSharedElementAnimation.FADE_IN)
             || ((mAnimation == RNSharedElementAnimation.MOVE) && (startStyle == null))
     ) {
+      RectF endRenderLayout = mResize == RNSharedElementResize.CLIP
+              ? interpolatedContentLayout
+              : interpolatedLayout;
       mEndView.updateViewAndDrawable(
-              interpolatedLayout,
+              endRenderLayout,
               parentLayout,
-              endLayout,
+              mResize == RNSharedElementResize.CLIP ? endContentLayout : endLayout,
               endFrame,
               endContent,
               interpolatedStyle,
@@ -757,11 +788,11 @@ public class RNSharedElementTransition extends ViewGroup {
     // Fire events
     if ((startStyle != null) && !startItem.getHasCalledOnMeasure()) {
       startItem.setHasCalledOnMeasure(true);
-      fireMeasureEvent("startNode", startItem, startLayout, startClippedLayout);
+      fireMeasureEvent("startNode", startItem, startLayout, startClippedLayout, startContentLayout);
     }
     if ((endStyle != null) && !endItem.getHasCalledOnMeasure()) {
       endItem.setHasCalledOnMeasure(true);
-      fireMeasureEvent("endNode", endItem, endLayout, endClippedLayout);
+      fireMeasureEvent("endNode", endItem, endLayout, endClippedLayout, endContentLayout);
     }
   }
 
@@ -854,7 +885,7 @@ public class RNSharedElementTransition extends ViewGroup {
     return clipInsets;
   }
 
-  private void fireMeasureEvent(String name, RNSharedElementTransitionItem item, RectF layout, RectF clippedLayout) {
+  private void fireMeasureEvent(String name, RNSharedElementTransitionItem item, RectF layout, RectF clippedLayout, RectF contentLayout) {
     ReactContext reactContext = (ReactContext) getContext();
     RNSharedElementStyle style = item.getStyle();
     RNSharedElementContent content = item.getContent();
@@ -868,11 +899,10 @@ public class RNSharedElementTransition extends ViewGroup {
     layoutData.putDouble("visibleY", PixelUtil.toDIPFromPixel(clippedLayout.top - mParentOffset[1]));
     layoutData.putDouble("visibleWidth", PixelUtil.toDIPFromPixel(clippedLayout.width()));
     layoutData.putDouble("visibleHeight", PixelUtil.toDIPFromPixel(clippedLayout.height()));
-    // TODO: intrinsic content (unclipped size & position of image)
-    layoutData.putDouble("contentX", PixelUtil.toDIPFromPixel(layout.left - mParentOffset[0])); // TODO
-    layoutData.putDouble("contentY", PixelUtil.toDIPFromPixel(layout.top - mParentOffset[1])); // TODO
-    layoutData.putDouble("contentWidth", PixelUtil.toDIPFromPixel(layout.width())); // TODO
-    layoutData.putDouble("contentHeight", PixelUtil.toDIPFromPixel(layout.height())); // TODO
+    layoutData.putDouble("contentX", PixelUtil.toDIPFromPixel(contentLayout.left - mParentOffset[0]));
+    layoutData.putDouble("contentY", PixelUtil.toDIPFromPixel(contentLayout.top - mParentOffset[1]));
+    layoutData.putDouble("contentWidth", PixelUtil.toDIPFromPixel(contentLayout.width()));
+    layoutData.putDouble("contentHeight", PixelUtil.toDIPFromPixel(contentLayout.height()));
 
     WritableMap styleData = Arguments.createMap();
     styleData.putDouble("borderTopLeftRadius", PixelUtil.toDIPFromPixel(style.borderTopLeftRadius));

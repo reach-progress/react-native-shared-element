@@ -5,6 +5,7 @@ import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.widget.ImageView;
 
+import com.facebook.drawee.drawable.ScalingUtils.ScaleType;
 import com.facebook.drawee.view.GenericDraweeView;
 import com.facebook.drawee.generic.GenericDraweeHierarchy;
 import com.facebook.drawee.interfaces.DraweeController;
@@ -38,37 +39,43 @@ class RNSharedElementContent {
     return new RectF(0, 0, view.getWidth(), view.getHeight());
   }
 
-    /*
-    static public Rect getLayout(Rect layout, RectF contentSize, ScaleType scaleType, boolean reverse) {
-        float width = layout.width();
-        float height = layout.height();
-        float contentAspectRatio = (contentSize.width() / contentSize.height());
-        boolean lo = (width / height) < contentAspectRatio;
-        boolean aspectRatioCriteria = reverse ? !lo : lo;
-        if (scaleType == ScaleType.FIT_CENTER) {
-            // contain
-            if (aspectRatioCriteria) {
-                height = width / contentAspectRatio;
-            } else {
-                width = height * contentAspectRatio;
-            }
-        } else if (scaleType == ScaleType.CENTER_CROP) {
-            // cover
-            if (aspectRatioCriteria) {
-                width = height * contentAspectRatio;
-            } else {
-                height = width / contentAspectRatio;
-            }
-        } else if (scaleType == ScaleType.CENTER_INSIDE) {
-            // center
-            width = contentSize.width();
-            height = contentSize.height();
-        }
-        return new Rect(
-                (int) (layout.left + ((layout.width() - width) / 2)),
-                (int) (layout.top + ((layout.height() - height) / 2)),
-                (int) (layout.right - ((layout.width() - width) / 2)),
-                (int) (layout.bottom - ((layout.height() - height) / 2))
-        );
-    }*/
+  static RectF getLayout(RectF layout, RectF contentSize, ScaleType scaleType, boolean reverse) {
+    if (contentSize == null || contentSize.width() <= 0 || contentSize.height() <= 0) {
+      return new RectF(layout);
+    }
+
+    float width = layout.width();
+    float height = layout.height();
+    float contentAspectRatio = contentSize.width() / contentSize.height();
+    boolean layoutIsNarrowerThanContent = (width / height) < contentAspectRatio;
+    boolean shouldConstrainByWidth = reverse
+            ? !layoutIsNarrowerThanContent
+            : layoutIsNarrowerThanContent;
+
+    if (scaleType == ScaleType.FIT_CENTER) {
+      if (shouldConstrainByWidth) {
+        height = width / contentAspectRatio;
+      } else {
+        width = height * contentAspectRatio;
+      }
+    } else if (scaleType == ScaleType.CENTER_CROP) {
+      if (shouldConstrainByWidth) {
+        width = height * contentAspectRatio;
+      } else {
+        height = width / contentAspectRatio;
+      }
+    } else if (scaleType == ScaleType.CENTER_INSIDE) {
+      width = contentSize.width();
+      height = contentSize.height();
+    }
+
+    float horizontalInset = (layout.width() - width) / 2f;
+    float verticalInset = (layout.height() - height) / 2f;
+    return new RectF(
+            layout.left + horizontalInset,
+            layout.top + verticalInset,
+            layout.right - horizontalInset,
+            layout.bottom - verticalInset
+    );
+  }
 }
