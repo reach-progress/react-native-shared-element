@@ -13,8 +13,7 @@
     "prepare_disabled": "expo-module prepare",
     "prepublishOnly": "expo-module prepublishOnly",
     "expo-module": "expo-module",
-    "copy-flow-typings": "mkdir -p ./build && cp ./flow-typed/index.js.flow ./build/index.js.flow",
-    "prepare": "yarn copy-flow-typings"
+    "copy-flow-typings": "mkdir -p ./build && cp ./flow-typed/index.js.flow ./build/index.js.flow"
   },
   "keywords": [
     "react-native-shared-element",
