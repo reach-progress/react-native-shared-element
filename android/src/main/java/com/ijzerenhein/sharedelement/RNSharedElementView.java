@@ -1,6 +1,6 @@
 package com.ijzerenhein.sharedelement;
 
-// import android.util.Log;
+import android.util.Log;
 import android.view.View;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -8,10 +8,12 @@ import android.graphics.RectF;
 import com.facebook.react.uimanager.ThemedReactContext;
 
 class RNSharedElementView extends View {
-  // static private final String LOG_TAG = "RNSharedElementView";
+  static private final String LOG_TAG = "RNSharedElementView";
+  static private final boolean DEBUG = true;
 
   private final RNSharedElementDrawable mDrawable;
   private RNSharedElementDrawable.ViewType mViewType;
+  private int mLastLoggedBucket = -1;
 
   RNSharedElementView(ThemedReactContext context) {
     super(context);
@@ -46,6 +48,7 @@ class RNSharedElementView extends View {
     boolean useGPUScaling = (resize != RNSharedElementResize.CLIP) &&
             ((viewType == RNSharedElementDrawable.ViewType.GENERIC) ||
                     (viewType == RNSharedElementDrawable.ViewType.PLAIN));
+    boolean shouldLog = shouldLog(position);
 
     // Update layer type
     if (mViewType != viewType) {
@@ -106,6 +109,22 @@ class RNSharedElementView extends View {
 
         setScaleX(scaleX);
         setScaleY(scaleY);
+        if (shouldLog) {
+          logUpdate(
+            viewType,
+            useGPUScaling,
+            layout,
+            parentLayout,
+            originalLayout,
+            originalFrame,
+            content,
+            resize,
+            align,
+            position,
+            scaleX,
+            scaleY
+          );
+        }
       }
       setPivotX(0);
       setPivotY(0);
@@ -115,6 +134,22 @@ class RNSharedElementView extends View {
       layout(0, 0, (int) Math.ceil(width), (int) Math.ceil(height));
       setTranslationX(layout.left - parentLayout.left);
       setTranslationY(layout.top - parentLayout.top);
+      if (shouldLog) {
+        logUpdate(
+          viewType,
+          useGPUScaling,
+          layout,
+          parentLayout,
+          originalLayout,
+          originalFrame,
+          content,
+          resize,
+          align,
+          position,
+          getScaleX(),
+          getScaleY()
+        );
+      }
     }
 
     // Update view opacity and elevation
@@ -122,5 +157,66 @@ class RNSharedElementView extends View {
     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
       setElevation(style.elevation);
     }
+  }
+
+  private boolean shouldLog(float position) {
+    if (!DEBUG) return false;
+    int bucket = Math.round(position * 10.0f);
+    if (bucket == mLastLoggedBucket) return false;
+    mLastLoggedBucket = bucket;
+    return true;
+  }
+
+  private void logUpdate(
+    RNSharedElementDrawable.ViewType viewType,
+    boolean useGPUScaling,
+    RectF layout,
+    RectF parentLayout,
+    RectF originalLayout,
+    Rect originalFrame,
+    RNSharedElementContent content,
+    RNSharedElementResize resize,
+    RNSharedElementAlign align,
+    float position,
+    float scaleX,
+    float scaleY
+  ) {
+    Log.d(
+      LOG_TAG,
+      "position="
+        + position
+        + " viewType="
+        + viewType
+        + " contentView="
+        + (content != null && content.view != null ? content.view.getClass().getSimpleName() : "null")
+        + " contentSize="
+        + (content != null ? content.size : null)
+        + " resize="
+        + resize
+        + " align="
+        + align
+        + " useGPUScaling="
+        + useGPUScaling
+        + " layout="
+        + layout
+        + " parent="
+        + parentLayout
+        + " originalLayout="
+        + originalLayout
+        + " frame="
+        + originalFrame
+        + " measured="
+        + getWidth()
+        + "x"
+        + getHeight()
+        + " translation="
+        + getTranslationX()
+        + ","
+        + getTranslationY()
+        + " scale="
+        + scaleX
+        + ","
+        + scaleY
+    );
   }
 }

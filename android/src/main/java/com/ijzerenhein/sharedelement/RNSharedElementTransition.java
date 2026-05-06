@@ -28,7 +28,7 @@ import com.facebook.react.uimanager.events.EventDispatcher;
 
 public class RNSharedElementTransition extends ViewGroup {
   static private final String LOG_TAG = "RNSharedElementTransition";
-  static private final boolean DEBUG = false;
+  static private final boolean DEBUG = true;
   static private int sNextInstanceId = 1;
   // Native-timer animation is used for Fabric interop when JS-driven progress
   // does not update JS state. Uses Choreographer on the UI thread.
@@ -69,6 +69,8 @@ public class RNSharedElementTransition extends ViewGroup {
   private boolean mLoggedBootstrapWaitForSize = false;
   private boolean mHasDrawnRenderableFrame = false;
   private boolean mHasLoggedVisibilityDefer = false;
+  private int mLastLoggedLayoutBucket = -1;
+  private boolean mShouldLogRenderSnapshot = false;
 
   // Native-timer animation state for Fabric interop.
   private boolean mNativeDriver = false;
@@ -649,6 +651,18 @@ public class RNSharedElementTransition extends ViewGroup {
             )
             : RNSharedElementStyle.EMPTY_RECTF;
 
+    logLayoutSnapshot(
+      "source",
+      startStyle,
+      endStyle,
+      startContent,
+      endContent,
+      startLayout,
+      endLayout,
+      startContentLayout,
+      endContentLayout
+    );
+
     // Get interpolated layout
     RectF interpolatedLayout;
     RectF interpolatedContentLayout;
@@ -734,6 +748,14 @@ public class RNSharedElementTransition extends ViewGroup {
       RectF startRenderLayout = mResize == RNSharedElementResize.CLIP
               ? interpolatedContentLayout
               : interpolatedLayout;
+      logRenderSnapshot(
+        "start",
+        interpolatedLayout,
+        interpolatedContentLayout,
+        parentLayout,
+        startRenderLayout,
+        startFrame
+      );
       mStartView.updateViewAndDrawable(
               startRenderLayout,
               parentLayout,
@@ -756,6 +778,14 @@ public class RNSharedElementTransition extends ViewGroup {
       RectF endRenderLayout = mResize == RNSharedElementResize.CLIP
               ? interpolatedContentLayout
               : interpolatedLayout;
+      logRenderSnapshot(
+        "end",
+        interpolatedLayout,
+        interpolatedContentLayout,
+        parentLayout,
+        endRenderLayout,
+        endFrame
+      );
       mEndView.updateViewAndDrawable(
               endRenderLayout,
               parentLayout,
@@ -794,6 +824,93 @@ public class RNSharedElementTransition extends ViewGroup {
       endItem.setHasCalledOnMeasure(true);
       fireMeasureEvent("endNode", endItem, endLayout, endClippedLayout, endContentLayout);
     }
+  }
+
+  private boolean shouldLogLayoutSnapshot() {
+    mShouldLogRenderSnapshot = false;
+    if (!DEBUG) return false;
+    int bucket = Math.round(mNodePosition * 10.0f);
+    if (bucket == mLastLoggedLayoutBucket) return false;
+    mLastLoggedLayoutBucket = bucket;
+    mShouldLogRenderSnapshot = true;
+    return true;
+  }
+
+  private void logLayoutSnapshot(
+    String phase,
+    RNSharedElementStyle startStyle,
+    RNSharedElementStyle endStyle,
+    RNSharedElementContent startContent,
+    RNSharedElementContent endContent,
+    RectF startLayout,
+    RectF endLayout,
+    RectF startContentLayout,
+    RectF endContentLayout
+  ) {
+    if (!shouldLogLayoutSnapshot()) return;
+    log(
+      phase
+        + " position="
+        + mNodePosition
+        + " animation="
+        + mAnimation
+        + " resize="
+        + mResize
+        + " align="
+        + mAlign
+        + " initialVisibleAncestor="
+        + mInitialVisibleAncestorIndex
+        + " startScaleType="
+        + (startStyle != null ? startStyle.scaleType : null)
+        + " endScaleType="
+        + (endStyle != null ? endStyle.scaleType : null)
+        + " startLayout="
+        + startLayout
+        + " endLayout="
+        + endLayout
+        + " startContentSize="
+        + describeContentSize(startContent)
+        + " endContentSize="
+        + describeContentSize(endContent)
+        + " startContentLayout="
+        + startContentLayout
+        + " endContentLayout="
+        + endContentLayout
+    );
+  }
+
+  private void logRenderSnapshot(
+    String item,
+    RectF interpolatedLayout,
+    RectF interpolatedContentLayout,
+    RectF parentLayout,
+    RectF renderLayout,
+    Rect frame
+  ) {
+    if (!DEBUG || !mShouldLogRenderSnapshot) return;
+    log(
+      "render item="
+        + item
+        + " position="
+        + mNodePosition
+        + " outer="
+        + interpolatedLayout
+        + " content="
+        + interpolatedContentLayout
+        + " parent="
+        + parentLayout
+        + " render="
+        + renderLayout
+        + " frame="
+        + frame
+        + " requiresClipping="
+        + mRequiresClipping
+    );
+  }
+
+  private String describeContentSize(RNSharedElementContent content) {
+    if (content == null) return "null";
+    return content.size + " view=" + (content.view != null ? content.view.getClass().getSimpleName() : "null");
   }
 
   private void updateNodeVisibility() {

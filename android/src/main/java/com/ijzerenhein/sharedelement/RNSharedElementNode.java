@@ -31,7 +31,7 @@ abstract class RetryRunnable implements Runnable {
 
 class RNSharedElementNode {
   static private final String LOG_TAG = "RNSharedElementNode";
-  static private final boolean DEBUG = false;
+  static private final boolean DEBUG = true;
 
   private final Context mContext;
   private final int mReactTag;
@@ -148,27 +148,69 @@ class RNSharedElementNode {
     // imageview with the same size, then use that imageview
     if (view instanceof ViewGroup) {
       ViewGroup viewGroup = (ViewGroup) view;
-      if (viewGroup.getChildCount() == 1) {
+      if (isExpoImageViewWrapper(viewGroup)) {
+        ImageView imageView = getVisibleImageViewDescendant(viewGroup, style);
+        if (imageView != null) return imageView;
+      } else if (viewGroup.getChildCount() == 1) {
         View childView = viewGroup.getChildAt(0);
         if (childView instanceof ImageView) {
-          int left = childView.getLeft();
-          int top = childView.getTop();
-          int width = childView.getWidth();
-          int height = childView.getHeight();
-          int expectedLeft = Math.round(style.borderWidth);
-          int expectedTop = Math.round(style.borderWidth);
-          int expectedWidth = Math.round((float) viewGroup.getWidth() - (style.borderWidth * 2));
-          int expectedHeight = Math.round((float) viewGroup.getHeight() - (style.borderWidth * 2));
-          if (((left >= expectedLeft - 1) && (left <= expectedLeft + 1)) &&
-                  ((top >= expectedTop - 1) && (top <= expectedTop + 1)) &&
-                  ((width >= expectedWidth - 1) && (width <= expectedWidth + 1)) &&
-                  ((height >= expectedHeight - 1) && (height <= expectedHeight + 1))) {
+          if (imageViewFillsViewGroup((ImageView) childView, viewGroup, style)) {
             return childView;
           }
         }
       }
     }
     return view;
+  }
+
+  private static boolean isExpoImageViewWrapper(View view) {
+    return view.getClass().getName().equals("expo.modules.image.ExpoImageViewWrapper");
+  }
+
+  private static ImageView getVisibleImageViewDescendant(ViewGroup viewGroup, RNSharedElementStyle style) {
+    ImageView fallbackImageView = null;
+    for (int i = 0; i < viewGroup.getChildCount(); i++) {
+      View childView = viewGroup.getChildAt(i);
+      if (childView instanceof ImageView) {
+        ImageView imageView = (ImageView) childView;
+        if (!imageViewFillsViewGroup(imageView, viewGroup, style)) continue;
+
+        if (fallbackImageView == null) {
+          fallbackImageView = imageView;
+        }
+
+        if ((imageView.getVisibility() == View.VISIBLE) && (imageView.getDrawable() != null)) {
+          return imageView;
+        }
+      } else if (childView instanceof ViewGroup) {
+        ImageView imageView = getVisibleImageViewDescendant((ViewGroup) childView, style);
+        if (imageView == null) continue;
+
+        if (fallbackImageView == null) {
+          fallbackImageView = imageView;
+        }
+
+        if ((imageView.getVisibility() == View.VISIBLE) && (imageView.getDrawable() != null)) {
+          return imageView;
+        }
+      }
+    }
+    return fallbackImageView;
+  }
+
+  private static boolean imageViewFillsViewGroup(ImageView imageView, ViewGroup viewGroup, RNSharedElementStyle style) {
+    int left = imageView.getLeft();
+    int top = imageView.getTop();
+    int width = imageView.getWidth();
+    int height = imageView.getHeight();
+    int expectedLeft = Math.round(style.borderWidth);
+    int expectedTop = Math.round(style.borderWidth);
+    int expectedWidth = Math.round((float) viewGroup.getWidth() - (style.borderWidth * 2));
+    int expectedHeight = Math.round((float) viewGroup.getHeight() - (style.borderWidth * 2));
+    return ((left >= expectedLeft - 1) && (left <= expectedLeft + 1)) &&
+            ((top >= expectedTop - 1) && (top <= expectedTop + 1)) &&
+            ((width >= expectedWidth - 1) && (width <= expectedWidth + 1)) &&
+            ((height >= expectedHeight - 1) && (height <= expectedHeight + 1));
   }
 
   View getAncestorView() {
@@ -188,7 +230,35 @@ class RNSharedElementNode {
       }
     }
     mResolvedView = RNSharedElementNode.resolveView(view, mResolveStyle);
+    log(
+      "resolved root="
+        + describeView(mView)
+        + " candidate="
+        + describeView(view)
+        + " resolved="
+        + describeView(mResolvedView)
+        + " isParent="
+        + mIsParent
+    );
     return mResolvedView;
+  }
+
+  private static String describeView(View view) {
+    if (view == null) return "null";
+    return view.getClass().getSimpleName()
+      + "{"
+      + view.getWidth()
+      + "x"
+      + view.getHeight()
+      + " @ "
+      + view.getLeft()
+      + ","
+      + view.getTop()
+      + " alpha="
+      + view.getAlpha()
+      + " visible="
+      + view.getVisibility()
+      + "}";
   }
 
   void requestStyle(Callback callback) {

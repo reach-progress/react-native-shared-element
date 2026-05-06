@@ -154,6 +154,22 @@ export const RNAnimatedSharedElementTransitionView =
     ? Animated.createAnimatedComponent(RNSharedElementTransitionView)
     : undefined;
 
+const getResizeModeFromContentFit = (contentFit: unknown) => {
+  if (contentFit === "cover" || contentFit === "contain") {
+    return contentFit;
+  }
+
+  if (contentFit === "fill") {
+    return "stretch";
+  }
+
+  if (contentFit === "none" || contentFit === "scale-down") {
+    return "center";
+  }
+
+  return undefined;
+};
+
 export class SharedElementTransition extends React.Component<
   SharedElementTransitionProps,
   StateType
@@ -166,7 +182,10 @@ export class SharedElementTransition extends React.Component<
       nodeStyle = StyleSheet.flatten([props.style]) || {};
       delete nodeStyle.transform;
       delete nodeStyle.opacity;
-      nodeStyle.resizeMode = nodeStyle.resizeMode || props.resizeMode;
+      nodeStyle.resizeMode =
+        nodeStyle.resizeMode ||
+        props.resizeMode ||
+        getResizeModeFromContentFit(props.contentFit);
       if (nodeStyle.backgroundColor)
         nodeStyle.backgroundColor = processColor(nodeStyle.backgroundColor);
       if (nodeStyle.borderColor)
