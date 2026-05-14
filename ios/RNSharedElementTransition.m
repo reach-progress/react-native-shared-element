@@ -40,6 +40,7 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   UIView* _innerClipView;
   UIImageView* _primaryImageView;
   UIImageView* _secondaryImageView;
+  CALayer* _maskLayer;
   BOOL _reactFrameSet;
   BOOL _initialLayoutPassCompleted;
   int _initialVisibleAncestorIndex;
@@ -208,6 +209,10 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
     
     _primaryImageView = [self createImageView];
     _secondaryImageView = [self createImageView];
+
+    _maskLayer = [[CALayer alloc] init];
+    _maskLayer.backgroundColor = [UIColor whiteColor].CGColor;
+    self.layer.mask = _maskLayer;
   }
   
   return self;
@@ -713,10 +718,7 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
                                 clipTop,
                                 parentBounds.size.width - clipLeft - clipRight,
                                 parentBounds.size.height - clipTop - clipBottom);
-  CALayer *maskLayer = [[CALayer alloc] init];
-  maskLayer.backgroundColor = [UIColor whiteColor].CGColor;
-  maskLayer.frame = clipFrame;
-  self.layer.mask = maskLayer;
+  _maskLayer.frame = clipFrame;
   
   // Update outer style view. This view has all styles such as border-color,
   // background color, and shadow. Because of the shadow, the view itsself
