@@ -126,7 +126,7 @@ const debugColors = {
 
 const debugStyles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "black",
     opacity: 0.3,
   },
