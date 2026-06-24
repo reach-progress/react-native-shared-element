@@ -6,12 +6,14 @@ import { SharedElementNode } from "./types";
 export type SharedElementProps = ViewProps & {
   children: React.ReactNode;
   onNode: (node: SharedElementNode | null) => void;
+  debugName?: string;
 };
 
 export function nodeFromRef(
   ref: any,
   isParent?: boolean,
-  parentInstance?: any
+  parentInstance?: any,
+  debugName?: string
 ): SharedElementNode | null {
   const nodeHandle = ref ? findNodeHandle(ref) : undefined;
   return nodeHandle
@@ -20,6 +22,7 @@ export function nodeFromRef(
         nodeHandle,
         isParent: isParent || false,
         parentInstance,
+        debugName,
       }
     : null;
 }
@@ -34,7 +37,7 @@ export class SharedElement extends React.Component<SharedElementProps> {
   private _node: SharedElementNode | null = null;
 
   private onSetRef = (ref: any) => {
-    this._node = nodeFromRef(ref, true, this);
+    this._node = nodeFromRef(ref, true, this, this.props.debugName);
     if (this.props.onNode) {
       this.props.onNode(this._node);
     }
@@ -43,6 +46,7 @@ export class SharedElement extends React.Component<SharedElementProps> {
   render() {
     const {
       onNode, //eslint-disable-line @typescript-eslint/no-unused-vars
+      debugName, //eslint-disable-line @typescript-eslint/no-unused-vars
       ...otherProps
     } = this.props;
     return <View ref={this.onSetRef} collapsable={false} {...otherProps} />;

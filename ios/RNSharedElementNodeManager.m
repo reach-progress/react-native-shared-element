@@ -19,19 +19,20 @@
   return self;
 }
 
-- (RNSharedElementNode*) acquire:(NSNumber*) reactTag view:(UIView*)view isParent:(BOOL)isParent
+- (RNSharedElementNode*) acquire:(NSNumber*) reactTag view:(UIView*)view isParent:(BOOL)isParent debugName:(NSString*)debugName
 {
   @synchronized(_items)
   {
     RNSharedElementNode* node = [_items objectForKey:reactTag];
     if (node != nil) {
+      if (debugName.length) node.debugName = debugName;
       node.refCount = node.refCount + 1;
       DebugLog(@"RNSharedElementNodeManager: acquire existing reactTag=%@ refCount=%ld",
                reactTag,
                node.refCount);
       return node;
     }
-    node = [[RNSharedElementNode alloc]init:reactTag view:view isParent:isParent];
+    node = [[RNSharedElementNode alloc]init:reactTag view:view isParent:isParent debugName:debugName];
     [_items setObject:node forKey:reactTag];
     DebugLog(@"RNSharedElementNodeManager: acquire new reactTag=%@ isParent=%@ view=%@",
              reactTag,

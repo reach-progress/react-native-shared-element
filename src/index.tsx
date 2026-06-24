@@ -14,11 +14,13 @@ type NativeTransitionNode = {
     nodeHandle: number;
     isParent: boolean;
     nodeStyle?: Record<string, unknown>;
+    debugName?: string;
   };
   ancestor?: {
     nodeHandle: number;
     isParent: boolean;
     nodeStyle?: Record<string, unknown>;
+    debugName?: string;
   };
 };
 
@@ -57,9 +59,7 @@ export type SharedElementTransitionsReadyResult = {
 
 const moduleName = "RNSharedElementTransition";
 
-function getNativeModule():
-  | RNSharedElementTransitionNativeModule
-  | undefined {
+function getNativeModule(): RNSharedElementTransitionNativeModule | undefined {
   return NativeModules[moduleName] as
     | RNSharedElementTransitionNativeModule
     | undefined;

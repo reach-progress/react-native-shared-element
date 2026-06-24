@@ -87,6 +87,8 @@ export type SharedElementTransitionProps = {
   onMeasure?: (event: SharedElementOnMeasureEvent) => void;
   /** Override the native transition component (advanced usage). */
   SharedElementComponent?: any;
+  /** Human-readable transition name for native debug logs. */
+  debugName?: string;
 };
 
 const NativeAnimationType = new Map<SharedElementAnimation, number>([
@@ -197,6 +199,7 @@ export class SharedElementTransition extends React.Component<
           nodeHandle: node.nodeHandle,
           isParent: node.isParent,
           nodeStyle,
+          debugName: node.debugName,
         }
       : undefined;
   }

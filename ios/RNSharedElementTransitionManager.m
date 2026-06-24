@@ -218,6 +218,7 @@ RCT_EXPORT_MODULE(RNSharedElementTransition);
   }
   NSNumber* nodeHandle = [json valueForKey:@"nodeHandle"];
   NSNumber* isParent = [json valueForKey:@"isParent"];
+  NSString* debugName = [json valueForKey:@"debugName"];
   if ([nodeHandle isKindOfClass:[NSNumber class]]) {
     UIView *sourceView = [self.bridge.uiManager viewForReactTag:nodeHandle];
     if (!sourceView) {
@@ -226,7 +227,7 @@ RCT_EXPORT_MODULE(RNSharedElementTransition);
                isParent);
     }
     RNSharedElementNode* node =
-      [_nodeManager acquire:nodeHandle view:sourceView isParent:[isParent boolValue]];
+      [_nodeManager acquire:nodeHandle view:sourceView isParent:[isParent boolValue] debugName:debugName];
     DebugLog(@"RNSharedElementTransitionManager: nodeFromJson node=%@ isParent=%@",
              nodeHandle,
              isParent);
@@ -248,6 +249,7 @@ RCT_EXPORT_VIEW_PROPERTY(nodePosition, CGFloat);
 RCT_EXPORT_VIEW_PROPERTY(animation, NSInteger);
 RCT_EXPORT_VIEW_PROPERTY(resize, NSInteger);
 RCT_EXPORT_VIEW_PROPERTY(align, NSInteger);
+RCT_EXPORT_VIEW_PROPERTY(debugName, NSString);
 // Native-timer props used in Fabric interop mode.
 // Logged setters for native animation props.
 RCT_CUSTOM_VIEW_PROPERTY(nativeDriver, BOOL, RNSharedElementTransition)

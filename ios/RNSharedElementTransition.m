@@ -55,6 +55,20 @@ static NSString* RNSharedElementStyleString(RNSharedElementStyle* style)
           NSStringFromClass(style.view.class)];
 }
 
+static NSString* RNSharedElementNodeString(RNSharedElementNode* node)
+{
+  if (node == nil) return @"nil";
+  return [NSString stringWithFormat:@"name=%@ tag=%@ isParent=%@",
+          node.debugName ?: @"<unnamed-node>",
+          node.reactTag,
+          RNSharedElementBoolString(node.isParent)];
+}
+
+static NSString* RNSharedElementTransitionName(NSString* debugName)
+{
+  return debugName ?: @"<unnamed-transition>";
+}
+
 // Native CADisplayLink animation used for Fabric interop when JS-driven
 // Animated values do not update JS-side state. Fixed duration; eased to
 // feel closer to UIKit transitions.
@@ -121,8 +135,9 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   if (!isfinite(_nativeFrom)) _nativeFrom = _nodePosition;
   if (!isfinite(_nativeTo)) _nativeTo = 1.0f;
 
-  DebugLog(@"[RNSE:%ld] native anim start reason=%@ from=%.3f to=%.3f duration=%.1f delay=%.1f initialVisibleAncestor=%d",
+  DebugLog(@"[RNSE:%ld %@] native anim start reason=%@ from=%.3f to=%.3f duration=%.1f delay=%.1f initialVisibleAncestor=%d",
            (long)_debugId,
+           RNSharedElementTransitionName(_debugName),
            reason,
            _nativeFrom,
            _nativeTo,
@@ -310,10 +325,10 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 - (void)setStartNode:(RNSharedElementNode *)startNode
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_START]).node = startNode;
-  DebugLog(@"[RNSE:%ld] setStartNode reactTag=%@ isParent=%@",
+  DebugLog(@"[RNSE:%ld %@] setStartNode %@",
            (long)_debugId,
-           startNode ? startNode.reactTag : nil,
-           startNode ? (startNode.isParent ? @"YES" : @"NO") : nil);
+           RNSharedElementTransitionName(_debugName),
+           RNSharedElementNodeString(startNode));
   // Native animation can only start once both nodes/ancestors resolve.
   _nativeAnimationPending = _nativeDriver;
   [self startNativeAnimationIfReady:@"startNode"];
@@ -322,10 +337,10 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 - (void)setEndNode:(RNSharedElementNode *)endNode
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_END]).node = endNode;
-  DebugLog(@"[RNSE:%ld] setEndNode reactTag=%@ isParent=%@",
+  DebugLog(@"[RNSE:%ld %@] setEndNode %@",
            (long)_debugId,
-           endNode ? endNode.reactTag : nil,
-           endNode ? (endNode.isParent ? @"YES" : @"NO") : nil);
+           RNSharedElementTransitionName(_debugName),
+           RNSharedElementNodeString(endNode));
   // Native animation can only start once both nodes/ancestors resolve.
   _nativeAnimationPending = _nativeDriver;
   [self startNativeAnimationIfReady:@"endNode"];
@@ -334,10 +349,10 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 - (void)setStartAncestor:(RNSharedElementNode *)startNodeAncestor
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_START_ANCESTOR]).node = startNodeAncestor;
-  DebugLog(@"[RNSE:%ld] setStartAncestor reactTag=%@ isParent=%@",
+  DebugLog(@"[RNSE:%ld %@] setStartAncestor %@",
            (long)_debugId,
-           startNodeAncestor ? startNodeAncestor.reactTag : nil,
-           startNodeAncestor ? (startNodeAncestor.isParent ? @"YES" : @"NO") : nil);
+           RNSharedElementTransitionName(_debugName),
+           RNSharedElementNodeString(startNodeAncestor));
   // Ancestor resolution can happen later than nodes in Fabric interop.
   _nativeAnimationPending = _nativeDriver;
   [self startNativeAnimationIfReady:@"startAncestor"];
@@ -346,10 +361,10 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 - (void)setEndAncestor:(RNSharedElementNode *)endNodeAncestor
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_END_ANCESTOR]).node = endNodeAncestor;
-  DebugLog(@"[RNSE:%ld] setEndAncestor reactTag=%@ isParent=%@",
+  DebugLog(@"[RNSE:%ld %@] setEndAncestor %@",
            (long)_debugId,
-           endNodeAncestor ? endNodeAncestor.reactTag : nil,
-           endNodeAncestor ? (endNodeAncestor.isParent ? @"YES" : @"NO") : nil);
+           RNSharedElementTransitionName(_debugName),
+           RNSharedElementNodeString(endNodeAncestor));
   // Ancestor resolution can happen later than nodes in Fabric interop.
   _nativeAnimationPending = _nativeDriver;
   [self startNativeAnimationIfReady:@"endAncestor"];
@@ -454,9 +469,11 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
     if (hidden && (_animation == RNSharedElementAnimationFadeOut) && [item.name isEqualToString:@"endNode"]) hidden = NO;
     item.hidden = hidden;
     if (previousHidden != hidden) {
-      DebugLog(@"[RNSE:%ld] visibility item=%@ hidden=%@ hasStyle=%@ hasContent=%@ animation=%ld pos=%.3f",
+      DebugLog(@"[RNSE:%ld %@] visibility item=%@ node=%@ hidden=%@ hasStyle=%@ hasContent=%@ animation=%ld pos=%.3f",
                (long)_debugId,
+               RNSharedElementTransitionName(_debugName),
                item.name,
+               RNSharedElementNodeString(item.node),
                RNSharedElementBoolString(hidden),
                RNSharedElementBoolString(item.style != nil),
                RNSharedElementBoolString(item.content != nil),
@@ -499,10 +516,11 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   RNSharedElementTransitionItem* item = [self findItemForNode:node];
   if (item == nil) return;
   item.content = content;
-  DebugLog(@"[RNSE:%ld] didLoadContent item=%@ reactTag=%@ type=%@ hasData=%@",
+  DebugLog(@"[RNSE:%ld %@] didLoadContent item=%@ node=%@ type=%@ hasData=%@",
            (long)_debugId,
+           RNSharedElementTransitionName(_debugName),
            item.name,
-           [node respondsToSelector:@selector(reactTag)] ? [node reactTag] : nil,
+           RNSharedElementNodeString(node),
            content ? content.typeName : @"nil",
            RNSharedElementBoolString(content && content.data));
   if ((content.type == RNSharedElementContentTypeSnapshotImage) || (content.type == RNSharedElementContentTypeRawImage)) {
@@ -531,10 +549,11 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   RNSharedElementTransitionItem* item = [self findItemForNode:node];
   if (item == nil) return;
   item.style = style;
-  DebugLog(@"[RNSE:%ld] didLoadStyle item=%@ reactTag=%@ isAncestor=%@ %@",
+  DebugLog(@"[RNSE:%ld %@] didLoadStyle item=%@ node=%@ isAncestor=%@ %@",
            (long)_debugId,
+           RNSharedElementTransitionName(_debugName),
            item.name,
-           node.reactTag,
+           RNSharedElementNodeString(node),
            RNSharedElementBoolString(item.isAncestor),
            RNSharedElementStyleString(style));
   [self updateStyle];
@@ -741,12 +760,15 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
       visibilityReason = @"visibility-comparison";
     }
     if (_initialVisibleAncestorIndex >= 0) {
-      DebugLog(@"[RNSE:%ld] initialVisibleAncestor=%d reason=%@ startVisibility=%.4f endVisibility=%.4f startAncestor={%@} endAncestor={%@}",
+      DebugLog(@"[RNSE:%ld %@] initialVisibleAncestor=%d reason=%@ startVisibility=%.4f endVisibility=%.4f startAncestorNode=%@ endAncestorNode=%@ startAncestor={%@} endAncestor={%@}",
                (long)_debugId,
+               RNSharedElementTransitionName(_debugName),
                _initialVisibleAncestorIndex,
                visibilityReason,
                startAncestorVisibility,
                endAncestorVisibility,
+               RNSharedElementNodeString(startAncestor.node),
+               RNSharedElementNodeString(endAncestor.node),
                RNSharedElementStyleString(startAncenstorStyle),
                RNSharedElementStyleString(endAncestorStyle));
     }
@@ -794,13 +816,16 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   if (shouldLogGeometry) {
     _debugLastGeometryBucket = geometryBucket;
     _debugGeometryLogCount++;
-    DebugLog(@"[RNSE:%ld] geometry pos=%.3f bucket=%ld nativeAnimating=%@ nativePending=%@ initialVisibleAncestor=%d startCompensate=%@ endCompensate=%@ parentBounds=%@ startRaw={%@} endRaw={%@} startAncestor={%@} endAncestor={%@} startLayout=%@ endLayout=%@ startVisible=%@ endVisible=%@ startContent=%@ endContent=%@ interpolated=%@ interpolatedContent=%@ clipInsets={top=%.2f left=%.2f bottom=%.2f right=%.2f}",
+    DebugLog(@"[RNSE:%ld %@] geometry pos=%.3f bucket=%ld nativeAnimating=%@ nativePending=%@ initialVisibleAncestor=%d startItem=%@ endItem=%@ startCompensate=%@ endCompensate=%@ parentBounds=%@ startRaw={%@} endRaw={%@} startAncestor={%@} endAncestor={%@} startLayout=%@ endLayout=%@ startVisible=%@ endVisible=%@ startContent=%@ endContent=%@ interpolated=%@ interpolatedContent=%@ clipInsets={top=%.2f left=%.2f bottom=%.2f right=%.2f}",
              (long)_debugId,
+             RNSharedElementTransitionName(_debugName),
              _nodePosition,
              (long)geometryBucket,
              RNSharedElementBoolString(_nativeAnimating),
              RNSharedElementBoolString(_nativeAnimationPending),
              _initialVisibleAncestorIndex,
+             RNSharedElementNodeString(startItem.node),
+             RNSharedElementNodeString(endItem.node),
              RNSharedElementBoolString(startCompensate),
              RNSharedElementBoolString(endCompensate),
              RNSharedElementRectString(self.superview.bounds),
@@ -856,6 +881,7 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   
   // Update content
   UIView* contentView1 = (startItem.content && startItem.content.type == RNSharedElementContentTypeSnapshotView) ? startItem.content.data : _primaryImageView;
+  UIView* contentView2 = nil;
   if (contentView1.superview != _innerClipView) [_innerClipView addSubview:contentView1];
   if (_animation == RNSharedElementAnimationMove) {
     
@@ -869,7 +895,7 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   }
   else {
     // Update content-view 2
-    UIView* contentView2 = (endItem.content && endItem.content.type == RNSharedElementContentTypeSnapshotView) ? endItem.content.data : _secondaryImageView;
+    contentView2 = (endItem.content && endItem.content.type == RNSharedElementContentTypeSnapshotView) ? endItem.content.data : _secondaryImageView;
     if (contentView2.superview != _innerClipView) [_innerClipView addSubview:contentView2];
     
     // In all other cases, animate and interpolate both the start- and
@@ -977,6 +1003,28 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
       contentView1.layer.opacity = 1.0f - MIN(MAX(_nodePosition, 0.0f), 1.0f);
       contentView2.layer.opacity = MIN(MAX(_nodePosition, 0.0f), 1.0f);
     }
+  }
+
+  if (shouldLogGeometry) {
+    DebugLog(@"[RNSE:%ld %@] draw pos=%.3f bucket=%ld outerFrame=%@ innerFrame=%@ maskFrame=%@ content1Frame=%@ content1Alpha=%.3f content1Class=%@ content2Frame=%@ content2Alpha=%.3f content2Class=%@ primaryImageSize=%@ secondaryImageSize=%@ animation=%ld resize=%ld align=%ld",
+             (long)_debugId,
+             RNSharedElementTransitionName(_debugName),
+             _nodePosition,
+             (long)geometryBucket,
+             RNSharedElementRectString(_outerStyleView.frame),
+             RNSharedElementRectString(_innerClipView.frame),
+             RNSharedElementRectString(_maskLayer.frame),
+             RNSharedElementRectString(contentView1.frame),
+             contentView1.layer.opacity,
+             NSStringFromClass(contentView1.class),
+             contentView2 ? RNSharedElementRectString(contentView2.frame) : @"nil",
+             contentView2 ? contentView2.layer.opacity : 0.0f,
+             contentView2 ? NSStringFromClass(contentView2.class) : @"nil",
+             NSStringFromCGSize(_primaryImageView.image ? _primaryImageView.image.size : CGSizeZero),
+             NSStringFromCGSize(_secondaryImageView.image ? _secondaryImageView.image.size : CGSizeZero),
+             (long)_animation,
+             (long)_resize,
+             (long)_align);
   }
   
   // Fire events

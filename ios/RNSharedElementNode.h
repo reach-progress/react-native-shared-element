@@ -12,10 +12,11 @@
 
 @property (nonatomic, readonly) NSNumber* reactTag;
 @property (nonatomic, readonly) BOOL isParent;
+@property (nonatomic, copy) NSString* debugName;
 @property (nonatomic) long refCount;
 @property (nonatomic) long hideRefCount;
 
-- (instancetype)init:(NSNumber *)reactTag view:(UIView*) view isParent:(BOOL)isParent;
+- (instancetype)init:(NSNumber *)reactTag view:(UIView*) view isParent:(BOOL)isParent debugName:(NSString*)debugName;
 
 - (void) requestContent:(id <RNSharedElementDelegate>) delegate;
 - (void) requestStyle:(id <RNSharedElementDelegate>) delegate;

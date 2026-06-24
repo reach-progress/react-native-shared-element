@@ -60,9 +60,10 @@ NSArray* _imageResolvers;
   _imageResolvers = imageResolvers;
 }
 
-- (instancetype)init:(NSNumber *)reactTag view:(UIView*) view isParent:(BOOL)isParent
+- (instancetype)init:(NSNumber *)reactTag view:(UIView*) view isParent:(BOOL)isParent debugName:(NSString*)debugName
 {
   _reactTag = reactTag;
+  _debugName = [debugName copy];
   _sourceView = view;
   _isParent = isParent;
   _refCount = 1;

@@ -3,6 +3,7 @@ export type SharedElementNode = {
   nodeHandle: number;
   isParent: boolean;
   parentInstance: any;
+  debugName?: string;
 };
 
 export type SharedElementAnimation = "move" | "fade" | "fade-in" | "fade-out";
