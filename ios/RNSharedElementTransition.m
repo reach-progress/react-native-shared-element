@@ -18,7 +18,42 @@
 #define ITEM_START 2
 #define ITEM_END 3
 
+#ifndef RNSE_DEBUG_LAYOUT
+#ifdef DEBUG
+#define RNSE_DEBUG_LAYOUT 1
+#else
+#define RNSE_DEBUG_LAYOUT 0
+#endif
+#endif
+
+#if RNSE_DEBUG_LAYOUT
+#define DebugLog(...) NSLog(__VA_ARGS__)
+#else
 #define DebugLog(...) (void)0
+#endif
+
+static NSInteger RNSharedElementTransitionNextDebugId = 1;
+
+static NSString* RNSharedElementBoolString(BOOL value)
+{
+  return value ? @"YES" : @"NO";
+}
+
+static NSString* RNSharedElementRectString(CGRect rect)
+{
+  return CGRectIsNull(rect) ? @"null" : NSStringFromCGRect(rect);
+}
+
+static NSString* RNSharedElementStyleString(RNSharedElementStyle* style)
+{
+  if (style == nil) return @"nil";
+  return [NSString stringWithFormat:@"layout=%@ size=%@ opacity=%.3f transform=%@ view=%@",
+          RNSharedElementRectString(style.layout),
+          NSStringFromCGSize(style.size),
+          style.opacity,
+          [RNSharedElementStyle stringFromTransform:style.transform],
+          NSStringFromClass(style.view.class)];
+}
 
 // Native CADisplayLink animation used for Fabric interop when JS-driven
 // Animated values do not update JS-side state. Fixed duration; eased to
@@ -53,6 +88,9 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   CGFloat _nativeDelay;
   BOOL _nativeAnimating;
   BOOL _nativeAnimationPending;
+  NSInteger _debugId;
+  NSInteger _debugLastGeometryBucket;
+  NSInteger _debugGeometryLogCount;
 }
 
 - (void)startNativeAnimationIfReady:(NSString*)reason
@@ -83,12 +121,14 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   if (!isfinite(_nativeFrom)) _nativeFrom = _nodePosition;
   if (!isfinite(_nativeTo)) _nativeTo = 1.0f;
 
-  DebugLog(@"RNSharedElementTransition: native anim start (reason=%@, from=%f, to=%f, duration=%f, delay=%f)",
+  DebugLog(@"[RNSE:%ld] native anim start reason=%@ from=%.3f to=%.3f duration=%.1f delay=%.1f initialVisibleAncestor=%d",
+           (long)_debugId,
            reason,
            _nativeFrom,
            _nativeTo,
            _nativeDuration,
-           _nativeDelay);
+           _nativeDelay,
+           _initialVisibleAncestorIndex);
 
   if (_displayLink == nil) {
     // Use the main run loop so updates align with UIKit rendering.
@@ -174,6 +214,9 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 - (instancetype)initWithNodeManager:(RNSharedElementNodeManager*)nodeManager
 {
   if ((self = [super init])) {
+    _debugId = RNSharedElementTransitionNextDebugId++;
+    _debugLastGeometryBucket = -1;
+    _debugGeometryLogCount = 0;
     _items = @[
       [[RNSharedElementTransitionItem alloc]initWithNodeManager:nodeManager name:@"startAncestor" isAncestor:YES],
       [[RNSharedElementTransitionItem alloc]initWithNodeManager:nodeManager name:@"endAncestor" isAncestor:YES],
@@ -267,7 +310,8 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 - (void)setStartNode:(RNSharedElementNode *)startNode
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_START]).node = startNode;
-  DebugLog(@"RNSharedElementTransition: setStartNode reactTag=%@ isParent=%@",
+  DebugLog(@"[RNSE:%ld] setStartNode reactTag=%@ isParent=%@",
+           (long)_debugId,
            startNode ? startNode.reactTag : nil,
            startNode ? (startNode.isParent ? @"YES" : @"NO") : nil);
   // Native animation can only start once both nodes/ancestors resolve.
@@ -278,7 +322,8 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 - (void)setEndNode:(RNSharedElementNode *)endNode
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_END]).node = endNode;
-  DebugLog(@"RNSharedElementTransition: setEndNode reactTag=%@ isParent=%@",
+  DebugLog(@"[RNSE:%ld] setEndNode reactTag=%@ isParent=%@",
+           (long)_debugId,
            endNode ? endNode.reactTag : nil,
            endNode ? (endNode.isParent ? @"YES" : @"NO") : nil);
   // Native animation can only start once both nodes/ancestors resolve.
@@ -289,7 +334,8 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 - (void)setStartAncestor:(RNSharedElementNode *)startNodeAncestor
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_START_ANCESTOR]).node = startNodeAncestor;
-  DebugLog(@"RNSharedElementTransition: setStartAncestor reactTag=%@ isParent=%@",
+  DebugLog(@"[RNSE:%ld] setStartAncestor reactTag=%@ isParent=%@",
+           (long)_debugId,
            startNodeAncestor ? startNodeAncestor.reactTag : nil,
            startNodeAncestor ? (startNodeAncestor.isParent ? @"YES" : @"NO") : nil);
   // Ancestor resolution can happen later than nodes in Fabric interop.
@@ -300,7 +346,8 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 - (void)setEndAncestor:(RNSharedElementNode *)endNodeAncestor
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_END_ANCESTOR]).node = endNodeAncestor;
-  DebugLog(@"RNSharedElementTransition: setEndAncestor reactTag=%@ isParent=%@",
+  DebugLog(@"[RNSE:%ld] setEndAncestor reactTag=%@ isParent=%@",
+           (long)_debugId,
            endNodeAncestor ? endNodeAncestor.reactTag : nil,
            endNodeAncestor ? (endNodeAncestor.isParent ? @"YES" : @"NO") : nil);
   // Ancestor resolution can happen later than nodes in Fabric interop.
@@ -401,10 +448,21 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 - (void)updateNodeVisibility
 {
   for (RNSharedElementTransitionItem* item in _items) {
+    BOOL previousHidden = item.hidden;
     BOOL hidden = _initialLayoutPassCompleted && item.style != nil && item.content != nil;
     if (hidden && (_animation == RNSharedElementAnimationFadeIn) && [item.name isEqualToString:@"startNode"]) hidden = NO;
     if (hidden && (_animation == RNSharedElementAnimationFadeOut) && [item.name isEqualToString:@"endNode"]) hidden = NO;
     item.hidden = hidden;
+    if (previousHidden != hidden) {
+      DebugLog(@"[RNSE:%ld] visibility item=%@ hidden=%@ hasStyle=%@ hasContent=%@ animation=%ld pos=%.3f",
+               (long)_debugId,
+               item.name,
+               RNSharedElementBoolString(hidden),
+               RNSharedElementBoolString(item.style != nil),
+               RNSharedElementBoolString(item.content != nil),
+               (long)_animation,
+               _nodePosition);
+    }
   }
 }
 
@@ -441,6 +499,12 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   RNSharedElementTransitionItem* item = [self findItemForNode:node];
   if (item == nil) return;
   item.content = content;
+  DebugLog(@"[RNSE:%ld] didLoadContent item=%@ reactTag=%@ type=%@ hasData=%@",
+           (long)_debugId,
+           item.name,
+           [node respondsToSelector:@selector(reactTag)] ? [node reactTag] : nil,
+           content ? content.typeName : @"nil",
+           RNSharedElementBoolString(content && content.data));
   if ((content.type == RNSharedElementContentTypeSnapshotImage) || (content.type == RNSharedElementContentTypeRawImage)) {
     UIImage* image = (UIImage*) content.data;
     if (_animation == RNSharedElementAnimationMove) {
@@ -467,6 +531,12 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   RNSharedElementTransitionItem* item = [self findItemForNode:node];
   if (item == nil) return;
   item.style = style;
+  DebugLog(@"[RNSE:%ld] didLoadStyle item=%@ reactTag=%@ isAncestor=%@ %@",
+           (long)_debugId,
+           item.name,
+           node.reactTag,
+           RNSharedElementBoolString(item.isAncestor),
+           RNSharedElementStyleString(style));
   [self updateStyle];
   [self updateNodeVisibility];
 }
@@ -655,14 +725,30 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   if (_initialVisibleAncestorIndex < 0) {
     RNSharedElementStyle* startAncenstorStyle = startAncestor.style;
     RNSharedElementStyle* endAncestorStyle = endAncestor.style;
+    NSString* visibilityReason = nil;
+    CGFloat startAncestorVisibility = -1.0f;
+    CGFloat endAncestorVisibility = -1.0f;
     if (startAncenstorStyle && !endAncestorStyle) {
       _initialVisibleAncestorIndex = 0;
+      visibilityReason = @"only-start-ancestor-style";
     } else if (!startAncenstorStyle && endAncestorStyle) {
       _initialVisibleAncestorIndex = 1;
+      visibilityReason = @"only-end-ancestor-style";
     } else if (startAncenstorStyle && endAncestorStyle){
-      CGFloat startAncestorVisibility = [self getAncestorVisibility:startAncenstorStyle];
-      CGFloat endAncestorVisibility = [self getAncestorVisibility:endAncestorStyle];
+      startAncestorVisibility = [self getAncestorVisibility:startAncenstorStyle];
+      endAncestorVisibility = [self getAncestorVisibility:endAncestorStyle];
       _initialVisibleAncestorIndex = endAncestorVisibility > startAncestorVisibility ? 1 : 0;
+      visibilityReason = @"visibility-comparison";
+    }
+    if (_initialVisibleAncestorIndex >= 0) {
+      DebugLog(@"[RNSE:%ld] initialVisibleAncestor=%d reason=%@ startVisibility=%.4f endVisibility=%.4f startAncestor={%@} endAncestor={%@}",
+               (long)_debugId,
+               _initialVisibleAncestorIndex,
+               visibilityReason,
+               startAncestorVisibility,
+               endAncestorVisibility,
+               RNSharedElementStyleString(startAncenstorStyle),
+               RNSharedElementStyleString(endAncestorStyle));
     }
   }
   
@@ -701,6 +787,39 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
     interpolatedLayout = endLayout;
     interpolatedClipInsets = endClipInsets;
     interpolatedContentLayout = endContentLayout;
+  }
+
+  NSInteger geometryBucket = (NSInteger)lrint(_nodePosition * 10.0f);
+  BOOL shouldLogGeometry = geometryBucket != _debugLastGeometryBucket || _debugGeometryLogCount < 4;
+  if (shouldLogGeometry) {
+    _debugLastGeometryBucket = geometryBucket;
+    _debugGeometryLogCount++;
+    DebugLog(@"[RNSE:%ld] geometry pos=%.3f bucket=%ld nativeAnimating=%@ nativePending=%@ initialVisibleAncestor=%d startCompensate=%@ endCompensate=%@ parentBounds=%@ startRaw={%@} endRaw={%@} startAncestor={%@} endAncestor={%@} startLayout=%@ endLayout=%@ startVisible=%@ endVisible=%@ startContent=%@ endContent=%@ interpolated=%@ interpolatedContent=%@ clipInsets={top=%.2f left=%.2f bottom=%.2f right=%.2f}",
+             (long)_debugId,
+             _nodePosition,
+             (long)geometryBucket,
+             RNSharedElementBoolString(_nativeAnimating),
+             RNSharedElementBoolString(_nativeAnimationPending),
+             _initialVisibleAncestorIndex,
+             RNSharedElementBoolString(startCompensate),
+             RNSharedElementBoolString(endCompensate),
+             RNSharedElementRectString(self.superview.bounds),
+             RNSharedElementStyleString(startStyle),
+             RNSharedElementStyleString(endStyle),
+             RNSharedElementStyleString(startAncestor.style),
+             RNSharedElementStyleString(endAncestor.style),
+             RNSharedElementRectString(startLayout),
+             RNSharedElementRectString(endLayout),
+             RNSharedElementRectString(startVisibleLayout),
+             RNSharedElementRectString(endVisibleLayout),
+             RNSharedElementRectString(startContentLayout),
+             RNSharedElementRectString(endContentLayout),
+             RNSharedElementRectString(interpolatedLayout),
+             RNSharedElementRectString(interpolatedContentLayout),
+             interpolatedClipInsets.top,
+             interpolatedClipInsets.left,
+             interpolatedClipInsets.bottom,
+             interpolatedClipInsets.right);
   }
   
   // Update frame
