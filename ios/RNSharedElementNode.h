@@ -21,6 +21,7 @@
 - (void) requestContent:(id <RNSharedElementDelegate>) delegate;
 - (void) requestStyle:(id <RNSharedElementDelegate>) delegate;
 - (void) cancelRequests:(id <RNSharedElementDelegate>) delegate;
+- (NSString*) debugSourceDescription;
 
 + (void) setImageResolvers:(NSArray*) imageResolvers;
 

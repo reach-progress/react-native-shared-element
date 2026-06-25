@@ -55,6 +55,78 @@ static NSString* RNSharedElementStyleString(RNSharedElementStyle* style)
           NSStringFromClass(style.view.class)];
 }
 
+static BOOL RNSharedElementShouldLogActualFrames(NSString* debugName)
+{
+  if (debugName == nil) return YES;
+  NSString* lowerName = debugName.lowercaseString;
+  return [lowerName containsString:@"action"] ||
+         [lowerName containsString:@"card"] ||
+         [lowerName containsString:@"banner"] ||
+         [lowerName containsString:@"image"] ||
+         [lowerName containsString:@"wrapper"];
+}
+
+static NSString* RNSharedElementWindowFrame(UIView* view)
+{
+  if (view == nil || view.window == nil) return @"nil";
+  return RNSharedElementRectString([view.window convertRect:view.bounds fromView:view]);
+}
+
+static NSString* RNSharedElementPresentationWindowFrame(UIView* view)
+{
+  if (view == nil || view.window == nil || view.superview == nil) return @"nil";
+  CALayer* presentationLayer = view.layer.presentationLayer;
+  if (presentationLayer == nil) return @"nil";
+  return RNSharedElementRectString([view.window convertRect:presentationLayer.frame fromView:view.superview]);
+}
+
+static NSString* RNSharedElementViewStateString(NSString* label, UIView* view)
+{
+  if (view == nil) {
+    return [NSString stringWithFormat:@"%@=nil", label];
+  }
+  CALayer* presentationLayer = view.layer.presentationLayer;
+  NSString* presentationFrame = presentationLayer ? RNSharedElementRectString(presentationLayer.frame) : @"nil";
+  NSString* presentationPosition = presentationLayer ? NSStringFromCGPoint(presentationLayer.position) : @"nil";
+  return [NSString stringWithFormat:@"%@={class=%@ ptr=%p tag=%@ hidden=%@ alpha=%.3f layerOpacity=%.3f clips=%@ masks=%@ frame=%@ bounds=%@ center=%@ windowFrame=%@ presentationFrame=%@ presentationWindowFrame=%@ layerPosition=%@ presentationPosition=%@ transform=%@}",
+          label,
+          NSStringFromClass(view.class),
+          view,
+          view.reactTag,
+          RNSharedElementBoolString(view.hidden),
+          view.alpha,
+          view.layer.opacity,
+          RNSharedElementBoolString(view.clipsToBounds),
+          RNSharedElementBoolString(view.layer.masksToBounds),
+          RNSharedElementRectString(view.frame),
+          RNSharedElementRectString(view.bounds),
+          NSStringFromCGPoint(view.center),
+          RNSharedElementWindowFrame(view),
+          presentationFrame,
+          RNSharedElementPresentationWindowFrame(view),
+          NSStringFromCGPoint(view.layer.position),
+          presentationPosition,
+          NSStringFromCGAffineTransform(view.transform)];
+}
+
+static NSString* RNSharedElementLayerStateString(NSString* label, CALayer* layer)
+{
+  if (layer == nil) {
+    return [NSString stringWithFormat:@"%@=nil", label];
+  }
+  CALayer* presentationLayer = layer.presentationLayer;
+  NSString* presentationFrame = presentationLayer ? RNSharedElementRectString(presentationLayer.frame) : @"nil";
+  NSString* presentationPosition = presentationLayer ? NSStringFromCGPoint(presentationLayer.position) : @"nil";
+  return [NSString stringWithFormat:@"%@={frame=%@ bounds=%@ position=%@ opacity=%.3f presentationFrame=%@ presentationPosition=%@}",
+          label,
+          RNSharedElementRectString(layer.frame),
+          RNSharedElementRectString(layer.bounds),
+          NSStringFromCGPoint(layer.position),
+          layer.opacity,
+          presentationFrame,
+          presentationPosition];
+}
+
 static NSString* RNSharedElementNodeString(RNSharedElementNode* node)
 {
   if (node == nil) return @"nil";
@@ -739,6 +811,13 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
            RNSharedElementNodeString(node),
            RNSharedElementBoolString(item.isAncestor),
            RNSharedElementStyleString(style));
+  if (RNSharedElementShouldLogActualFrames(_debugName) || RNSharedElementShouldLogActualFrames(node.debugName)) {
+    DebugLog(@"[RNSE:%ld %@] source item=%@ %@",
+             (long)_debugId,
+             RNSharedElementTransitionName(_debugName),
+             item.name,
+             [node debugSourceDescription]);
+  }
   [self updateStyle];
   [self updateNodeVisibility];
 }
@@ -1208,6 +1287,47 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
              (long)_animation,
              (long)_resize,
              (long)_align);
+  }
+
+  BOOL shouldLogActualFrames = shouldLogGeometry && RNSharedElementShouldLogActualFrames(_debugName);
+  if (shouldLogActualFrames) {
+    DebugLog(@"[RNSE:%ld %@] actual pos=%.3f bucket=%ld selfWindow=%@ superWindow=%@ %@ %@ %@ %@ %@ %@",
+             (long)_debugId,
+             RNSharedElementTransitionName(_debugName),
+             _nodePosition,
+             (long)geometryBucket,
+             RNSharedElementWindowFrame(self),
+             RNSharedElementWindowFrame(self.superview),
+             RNSharedElementViewStateString(@"self", self),
+             RNSharedElementViewStateString(@"outer", _outerStyleView),
+             RNSharedElementViewStateString(@"inner", _innerClipView),
+             RNSharedElementViewStateString(@"content1", contentView1),
+             contentView2 ? RNSharedElementViewStateString(@"content2", contentView2) : @"content2=nil",
+             RNSharedElementLayerStateString(@"mask", _maskLayer));
+
+    __weak RNSharedElementTransition* weakSelf = self;
+    UIView* loggedContentView1 = contentView1;
+    UIView* loggedContentView2 = contentView2;
+    CGFloat loggedPosition = _nodePosition;
+    NSInteger loggedBucket = geometryBucket;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      RNSharedElementTransition* strongSelf = weakSelf;
+      if (strongSelf == nil) return;
+      DebugLog(@"[RNSE:%ld %@] actual-async pos=%.3f currentPos=%.3f bucket=%ld selfWindow=%@ superWindow=%@ %@ %@ %@ %@ %@ %@",
+               (long)strongSelf->_debugId,
+               RNSharedElementTransitionName(strongSelf->_debugName),
+               loggedPosition,
+               strongSelf->_nodePosition,
+               (long)loggedBucket,
+               RNSharedElementWindowFrame(strongSelf),
+               RNSharedElementWindowFrame(strongSelf.superview),
+               RNSharedElementViewStateString(@"self", strongSelf),
+               RNSharedElementViewStateString(@"outer", strongSelf->_outerStyleView),
+               RNSharedElementViewStateString(@"inner", strongSelf->_innerClipView),
+               RNSharedElementViewStateString(@"content1", loggedContentView1),
+               loggedContentView2 ? RNSharedElementViewStateString(@"content2", loggedContentView2) : @"content2=nil",
+               RNSharedElementLayerStateString(@"mask", strongSelf->_maskLayer));
+    });
   }
   
   // Fire events
