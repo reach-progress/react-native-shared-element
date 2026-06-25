@@ -10,8 +10,6 @@
 #import "RNSharedElementNodeManager.h"
 #import "RNSharedElementTypes.h"
 
-#define DebugLog(...) (void)0
-
 @class RNSharedElementTransitionWaitProbe;
 
 typedef void (^RNSharedElementTransitionWaitProbeComplete)(
@@ -195,14 +193,12 @@ RCT_EXPORT_MODULE(RNSharedElementTransition);
   if ((self = [super init])) {
     _nodeManager = [[RNSharedElementNodeManager alloc]init];
     _waitProbes = [[NSMutableSet alloc]init];
-    DebugLog(@"RNSharedElementTransitionManager: init");
   }
   return self;
 }
 
 - (UIView *)view
 {
-  DebugLog(@"RNSharedElementTransitionManager: create view");
   return [[RNSharedElementTransition alloc] initWithNodeManager:_nodeManager];
 }
 
@@ -213,29 +209,16 @@ RCT_EXPORT_MODULE(RNSharedElementTransition);
 - (RNSharedElementNode*) nodeFromJson:(NSDictionary*)json
 {
   if (json == nil) {
-    DebugLog(@"RNSharedElementTransitionManager: nodeFromJson nil");
     return nil;
   }
   NSNumber* nodeHandle = [json valueForKey:@"nodeHandle"];
   NSNumber* isParent = [json valueForKey:@"isParent"];
-  NSString* debugName = [json valueForKey:@"debugName"];
   if ([nodeHandle isKindOfClass:[NSNumber class]]) {
     UIView *sourceView = [self.bridge.uiManager viewForReactTag:nodeHandle];
-    if (!sourceView) {
-      DebugLog(@"RNSharedElementTransitionManager: no view for nodeHandle=%@ isParent=%@",
-               nodeHandle,
-               isParent);
-    }
     RNSharedElementNode* node =
-      [_nodeManager acquire:nodeHandle view:sourceView isParent:[isParent boolValue] debugName:debugName];
-    DebugLog(@"RNSharedElementTransitionManager: nodeFromJson node=%@ isParent=%@",
-             nodeHandle,
-             isParent);
+      [_nodeManager acquire:nodeHandle view:sourceView isParent:[isParent boolValue]];
     return node;
   }
-  DebugLog(@"RNSharedElementTransitionManager: invalid nodeHandle=%@ isParent=%@",
-           nodeHandle,
-           isParent);
   return nil;
 }
 
@@ -249,50 +232,41 @@ RCT_EXPORT_VIEW_PROPERTY(nodePosition, CGFloat);
 RCT_EXPORT_VIEW_PROPERTY(animation, NSInteger);
 RCT_EXPORT_VIEW_PROPERTY(resize, NSInteger);
 RCT_EXPORT_VIEW_PROPERTY(align, NSInteger);
-RCT_EXPORT_VIEW_PROPERTY(debugName, NSString);
 // Native-timer props used in Fabric interop mode.
-// Logged setters for native animation props.
 RCT_CUSTOM_VIEW_PROPERTY(nativeDriver, BOOL, RNSharedElementTransition)
 {
   BOOL value = [RCTConvert BOOL:json];
   view.nativeDriver = value;
-  DebugLog(@"RNSharedElementTransitionManager: set nativeDriver=%@", value ? @"YES" : @"NO");
 }
 RCT_CUSTOM_VIEW_PROPERTY(nativeDuration, CGFloat, RNSharedElementTransition)
 {
   CGFloat value = [RCTConvert CGFloat:json];
   view.nativeDuration = value;
-  DebugLog(@"RNSharedElementTransitionManager: set nativeDuration=%f", value);
 }
 RCT_CUSTOM_VIEW_PROPERTY(nativeDelay, CGFloat, RNSharedElementTransition)
 {
   CGFloat value = [RCTConvert CGFloat:json];
   view.nativeDelay = value;
-  DebugLog(@"RNSharedElementTransitionManager: set nativeDelay=%f", value);
 }
 RCT_CUSTOM_VIEW_PROPERTY(nativeFrom, CGFloat, RNSharedElementTransition)
 {
   CGFloat value = [RCTConvert CGFloat:json];
   view.nativeFrom = value;
-  DebugLog(@"RNSharedElementTransitionManager: set nativeFrom=%f", value);
 }
 RCT_CUSTOM_VIEW_PROPERTY(nativeTo, CGFloat, RNSharedElementTransition)
 {
   CGFloat value = [RCTConvert CGFloat:json];
   view.nativeTo = value;
-  DebugLog(@"RNSharedElementTransitionManager: set nativeTo=%f", value);
 }
 RCT_CUSTOM_VIEW_PROPERTY(nativeGroup, NSString, RNSharedElementTransition)
 {
   NSString* value = [RCTConvert NSString:json];
   view.nativeGroup = value;
-  DebugLog(@"RNSharedElementTransitionManager: set nativeGroup=%@", value);
 }
 RCT_CUSTOM_VIEW_PROPERTY(nativeGroupSize, NSInteger, RNSharedElementTransition)
 {
   NSInteger value = [RCTConvert NSInteger:json];
   view.nativeGroupSize = value;
-  DebugLog(@"RNSharedElementTransitionManager: set nativeGroupSize=%ld", (long)value);
 }
 RCT_CUSTOM_VIEW_PROPERTY(startNode, NSObject, RNSharedElementTransition)
 {
@@ -300,9 +274,6 @@ RCT_CUSTOM_VIEW_PROPERTY(startNode, NSObject, RNSharedElementTransition)
   NSDictionary* ancestorJson = [json valueForKey:@"ancestor"];
   RNSharedElementNode* node = [self nodeFromJson:nodeJson];
   RNSharedElementNode* ancestor = [self nodeFromJson:ancestorJson];
-  DebugLog(@"RNSharedElementTransitionManager: set start node=%@ ancestor=%@",
-           node ? node.reactTag : nil,
-           ancestor ? ancestor.reactTag : nil);
   view.startNode = node;
   view.startAncestor = ancestor;
 }
@@ -312,9 +283,6 @@ RCT_CUSTOM_VIEW_PROPERTY(endNode, NSObject, RNSharedElementTransition)
   NSDictionary* ancestorJson = [json valueForKey:@"ancestor"];
   RNSharedElementNode* node = [self nodeFromJson:nodeJson];
   RNSharedElementNode* ancestor = [self nodeFromJson:ancestorJson];
-  DebugLog(@"RNSharedElementTransitionManager: set end node=%@ ancestor=%@",
-           node ? node.reactTag : nil,
-           ancestor ? ancestor.reactTag : nil);
   view.endNode = node;
   view.endAncestor = ancestor;
 }
@@ -329,8 +297,6 @@ RCT_REMAP_METHOD(configure,
   if (imageResolvers != nil) {
     [RNSharedElementNode setImageResolvers:imageResolvers];
   }
-  DebugLog(@"RNSharedElementTransitionManager: configure imageResolvers=%@",
-           imageResolvers ? @([imageResolvers count]) : nil);
   resolve(@(YES));
 }
 
@@ -365,7 +331,6 @@ RCT_REMAP_METHOD(waitForTransitionReady,
 
 + (BOOL)requiresMainQueueSetup
 {
-  DebugLog(@"RNSharedElementTransitionManager: requiresMainQueueSetup");
   return YES;
 }
 

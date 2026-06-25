@@ -6,7 +6,6 @@ import androidx.annotation.Nullable;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.util.Log;
 import android.view.View;
 
 import com.facebook.react.bridge.Arguments;
@@ -26,13 +25,6 @@ import com.facebook.react.bridge.UiThreadUtil;
 @ReactModule(name = RNSharedElementModule.MODULE_NAME)
 public class RNSharedElementModule extends ReactContextBaseJavaModule {
   public static final String MODULE_NAME = "RNSharedElementTransition";
-  private static final String LOG_TAG = "RNSharedElementModule";
-  private static final boolean DEBUG = false;
-
-  private static void log(String message) {
-    if (DEBUG) Log.d(LOG_TAG, message);
-  }
-
   private final RNSharedElementNodeManager mNodeManager;
 
   public RNSharedElementModule(ReactApplicationContext reactContext) {
@@ -81,7 +73,6 @@ public class RNSharedElementModule extends ReactContextBaseJavaModule {
         : null;
     View nodeView = resolveViewForTag(nodeHandle);
     if (nodeView == null) {
-      log("waitForTransitionReady resolve nodeView failed handle=" + nodeHandle);
       return null;
     }
     View ancestorView = resolveViewForTag(ancestorHandle);
@@ -157,14 +148,6 @@ public class RNSharedElementModule extends ReactContextBaseJavaModule {
 
       startItem.setNode(acquireNodeFromTransitionItem(startItemMap));
       endItem.setNode(acquireNodeFromTransitionItem(endItemMap));
-      log(
-        "waitForTransitionReady start timeoutMs="
-          + effectiveTimeoutMs
-          + " hasStartNode="
-          + (startItem.getNode() != null)
-          + " hasEndNode="
-          + (endItem.getNode() != null)
-      );
 
       Runnable finish = () -> {
         if (finished[0]) return;
@@ -173,7 +156,6 @@ public class RNSharedElementModule extends ReactContextBaseJavaModule {
           handler.removeCallbacks(timeoutRunnableRef[0]);
         }
         WritableMap result = buildWaitResult("ready", startedAtMs, startItem, endItem);
-        log("waitForTransitionReady resolve reason=ready elapsedMs=" + result.getInt("elapsedMs"));
         promise.resolve(result);
         startItem.setNode(null);
         endItem.setNode(null);
@@ -183,7 +165,6 @@ public class RNSharedElementModule extends ReactContextBaseJavaModule {
         if (finished[0]) return;
         finished[0] = true;
         WritableMap result = buildWaitResult("timeout", startedAtMs, startItem, endItem);
-        log("waitForTransitionReady resolve reason=timeout elapsedMs=" + result.getInt("elapsedMs"));
         promise.resolve(result);
         startItem.setNode(null);
         endItem.setNode(null);
@@ -194,7 +175,6 @@ public class RNSharedElementModule extends ReactContextBaseJavaModule {
         if (!hasAnyNode(startItem, endItem)) {
           finished[0] = true;
           WritableMap result = buildWaitResult("no-nodes", startedAtMs, startItem, endItem);
-          log("waitForTransitionReady resolve reason=no-nodes elapsedMs=" + result.getInt("elapsedMs"));
           promise.resolve(result);
           startItem.setNode(null);
           endItem.setNode(null);

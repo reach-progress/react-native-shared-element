@@ -28,7 +28,6 @@
 @property (nonatomic, assign) CGFloat nativeTo;
 @property (nonatomic, copy) NSString* nativeGroup;
 @property (nonatomic, assign) NSInteger nativeGroupSize;
-@property (nonatomic, copy) NSString* debugName;
 @property (nonatomic, strong) RNSharedElementNode* startNode;
 @property (nonatomic, strong) RNSharedElementNode* startAncestor;
 @property (nonatomic, copy) RCTDirectEventBlock onMeasureNode;

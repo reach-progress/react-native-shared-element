@@ -91,8 +91,6 @@ export type SharedElementTransitionProps = {
   onMeasure?: (event: SharedElementOnMeasureEvent) => void;
   /** Override the native transition component (advanced usage). */
   SharedElementComponent?: any;
-  /** Human-readable transition name for native debug logs. */
-  debugName?: string;
 };
 
 const NativeAnimationType = new Map<SharedElementAnimation, number>([
@@ -132,7 +130,11 @@ const debugColors = {
 
 const debugStyles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFill,
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: "black",
     opacity: 0.3,
   },
@@ -203,7 +205,6 @@ export class SharedElementTransition extends React.Component<
           nodeHandle: node.nodeHandle,
           isParent: node.isParent,
           nodeStyle,
-          debugName: node.debugName,
         }
       : undefined;
   }
@@ -246,7 +247,6 @@ export class SharedElementTransition extends React.Component<
     this.setState({
       [`${nativeEvent.node}`]: nativeEvent,
     });
-    // console.log("onMeasure: ", nativeEvent);
     if (onMeasure) {
       onMeasure(event);
     }
@@ -352,10 +352,15 @@ export class SharedElementTransition extends React.Component<
       animation,
       resize,
       align,
+      nativeDriver,
+      nativeDuration,
+      nativeDelay,
+      nativeFrom,
+      nativeTo,
+      nativeGroup,
+      nativeGroupSize,
       onMeasure,
       debug,
-      // style,
-      ...otherProps
     } = this.props;
     if (!SharedElementComponent) {
       return null;
@@ -377,10 +382,14 @@ export class SharedElementTransition extends React.Component<
           resize={NativeResizeType.get(resize)}
           // @ts-ignore
           align={NativeAlignType.get(align)}
-          nativeDriver={true}
+          nativeDriver={nativeDriver ?? true}
+          nativeDuration={nativeDuration}
+          nativeDelay={nativeDelay}
+          nativeFrom={nativeFrom}
+          nativeTo={nativeTo}
+          nativeGroup={nativeGroup}
+          nativeGroupSize={nativeGroupSize}
           onMeasureNode={debug ? this.onMeasureNode : onMeasure}
-          // style={debug && style ? [debugStyles.content, style] : style}
-          {...otherProps}
         />
         {/*this.renderDebugOverlay()*/}
         {this.renderDebugLayer("startNode")}

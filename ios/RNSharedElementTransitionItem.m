@@ -7,12 +7,6 @@
 #import <UIKit/UIKit.h>
 #import "RNSharedElementTransitionItem.h"
 
-#ifdef DEBUG
-#define DebugLog(...) NSLog(__VA_ARGS__)
-#else
-#define DebugLog(...) (void)0
-#endif
-
 @implementation RNSharedElementTransitionItem {
   
   CGRect _visibleLayoutCache;

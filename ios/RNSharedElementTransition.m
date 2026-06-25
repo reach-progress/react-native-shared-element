@@ -18,129 +18,6 @@
 #define ITEM_START 2
 #define ITEM_END 3
 
-#ifndef RNSE_DEBUG_LAYOUT
-#ifdef DEBUG
-#define RNSE_DEBUG_LAYOUT 1
-#else
-#define RNSE_DEBUG_LAYOUT 0
-#endif
-#endif
-
-#if RNSE_DEBUG_LAYOUT
-#define DebugLog(...) NSLog(__VA_ARGS__)
-#else
-#define DebugLog(...) (void)0
-#endif
-
-static NSInteger RNSharedElementTransitionNextDebugId = 1;
-
-static NSString* RNSharedElementBoolString(BOOL value)
-{
-  return value ? @"YES" : @"NO";
-}
-
-static NSString* RNSharedElementRectString(CGRect rect)
-{
-  return CGRectIsNull(rect) ? @"null" : NSStringFromCGRect(rect);
-}
-
-static NSString* RNSharedElementStyleString(RNSharedElementStyle* style)
-{
-  if (style == nil) return @"nil";
-  return [NSString stringWithFormat:@"layout=%@ size=%@ opacity=%.3f transform=%@ view=%@",
-          RNSharedElementRectString(style.layout),
-          NSStringFromCGSize(style.size),
-          style.opacity,
-          [RNSharedElementStyle stringFromTransform:style.transform],
-          NSStringFromClass(style.view.class)];
-}
-
-static BOOL RNSharedElementShouldLogActualFrames(NSString* debugName)
-{
-  if (debugName == nil) return YES;
-  NSString* lowerName = debugName.lowercaseString;
-  return [lowerName containsString:@"action"] ||
-         [lowerName containsString:@"card"] ||
-         [lowerName containsString:@"banner"] ||
-         [lowerName containsString:@"image"] ||
-         [lowerName containsString:@"wrapper"];
-}
-
-static NSString* RNSharedElementWindowFrame(UIView* view)
-{
-  if (view == nil || view.window == nil) return @"nil";
-  return RNSharedElementRectString([view.window convertRect:view.bounds fromView:view]);
-}
-
-static NSString* RNSharedElementPresentationWindowFrame(UIView* view)
-{
-  if (view == nil || view.window == nil || view.superview == nil) return @"nil";
-  CALayer* presentationLayer = view.layer.presentationLayer;
-  if (presentationLayer == nil) return @"nil";
-  return RNSharedElementRectString([view.window convertRect:presentationLayer.frame fromView:view.superview]);
-}
-
-static NSString* RNSharedElementViewStateString(NSString* label, UIView* view)
-{
-  if (view == nil) {
-    return [NSString stringWithFormat:@"%@=nil", label];
-  }
-  CALayer* presentationLayer = view.layer.presentationLayer;
-  NSString* presentationFrame = presentationLayer ? RNSharedElementRectString(presentationLayer.frame) : @"nil";
-  NSString* presentationPosition = presentationLayer ? NSStringFromCGPoint(presentationLayer.position) : @"nil";
-  return [NSString stringWithFormat:@"%@={class=%@ ptr=%p tag=%@ hidden=%@ alpha=%.3f layerOpacity=%.3f clips=%@ masks=%@ frame=%@ bounds=%@ center=%@ windowFrame=%@ presentationFrame=%@ presentationWindowFrame=%@ layerPosition=%@ presentationPosition=%@ transform=%@}",
-          label,
-          NSStringFromClass(view.class),
-          view,
-          view.reactTag,
-          RNSharedElementBoolString(view.hidden),
-          view.alpha,
-          view.layer.opacity,
-          RNSharedElementBoolString(view.clipsToBounds),
-          RNSharedElementBoolString(view.layer.masksToBounds),
-          RNSharedElementRectString(view.frame),
-          RNSharedElementRectString(view.bounds),
-          NSStringFromCGPoint(view.center),
-          RNSharedElementWindowFrame(view),
-          presentationFrame,
-          RNSharedElementPresentationWindowFrame(view),
-          NSStringFromCGPoint(view.layer.position),
-          presentationPosition,
-          NSStringFromCGAffineTransform(view.transform)];
-}
-
-static NSString* RNSharedElementLayerStateString(NSString* label, CALayer* layer)
-{
-  if (layer == nil) {
-    return [NSString stringWithFormat:@"%@=nil", label];
-  }
-  CALayer* presentationLayer = layer.presentationLayer;
-  NSString* presentationFrame = presentationLayer ? RNSharedElementRectString(presentationLayer.frame) : @"nil";
-  NSString* presentationPosition = presentationLayer ? NSStringFromCGPoint(presentationLayer.position) : @"nil";
-  return [NSString stringWithFormat:@"%@={frame=%@ bounds=%@ position=%@ opacity=%.3f presentationFrame=%@ presentationPosition=%@}",
-          label,
-          RNSharedElementRectString(layer.frame),
-          RNSharedElementRectString(layer.bounds),
-          NSStringFromCGPoint(layer.position),
-          layer.opacity,
-          presentationFrame,
-          presentationPosition];
-}
-
-static NSString* RNSharedElementNodeString(RNSharedElementNode* node)
-{
-  if (node == nil) return @"nil";
-  return [NSString stringWithFormat:@"name=%@ tag=%@ isParent=%@",
-          node.debugName ?: @"<unnamed-node>",
-          node.reactTag,
-          RNSharedElementBoolString(node.isParent)];
-}
-
-static NSString* RNSharedElementTransitionName(NSString* debugName)
-{
-  return debugName ?: @"<unnamed-transition>";
-}
-
 // Native CADisplayLink animation used for Fabric interop when JS-driven
 // Animated values do not update JS-side state. Fixed duration; eased to
 // feel closer to UIKit transitions.
@@ -193,7 +70,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 }
 
 @interface RNSharedElementTransition ()
-- (void)beginNativeAnimationAtTime:(CFTimeInterval)startTime reason:(NSString*)reason;
+- (void)beginNativeAnimationAtTime:(CFTimeInterval)startTime;
 @end
 
 @implementation RNSharedElementTransition
@@ -218,9 +95,6 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   BOOL _nativeAnimationPending;
   BOOL _nativeAnimationStartScheduled;
   NSString* _nativeRegisteredGroup;
-  NSInteger _debugId;
-  NSInteger _debugLastGeometryBucket;
-  NSInteger _debugGeometryLogCount;
 }
 
 - (void)removeFromNativeAnimationGroup
@@ -235,7 +109,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   _nativeRegisteredGroup = nil;
 }
 
-+ (void)startNativeAnimationGroup:(RNSharedElementNativeAnimationGroup*)group reason:(NSString*)reason
++ (void)startNativeAnimationGroup:(RNSharedElementNativeAnimationGroup*)group
 {
   if (group == nil || group.started) return;
 
@@ -247,20 +121,12 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   }
   group.startTime = CACurrentMediaTime() + maxDelaySeconds;
 
-  DebugLog(@"[RNSE:group %@] native anim group start reason=%@ count=%lu expected=%ld startTime=%.6f delay=%.3f",
-           group.groupId,
-           reason,
-           (unsigned long)transitions.count,
-           (long)group.expectedCount,
-           group.startTime,
-           maxDelaySeconds * 1000.0);
-
   for (RNSharedElementTransition* transition in transitions) {
-    [transition beginNativeAnimationAtTime:group.startTime reason:reason];
+    [transition beginNativeAnimationAtTime:group.startTime];
   }
 }
 
-- (BOOL)queueNativeAnimationInGroup:(NSString*)reason
+- (BOOL)queueNativeAnimationInGroup
 {
   if (_nativeGroup.length == 0 || _nativeGroupSize <= 1) {
     return NO;
@@ -276,7 +142,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   }
 
   if (group.started) {
-    [self beginNativeAnimationAtTime:group.startTime reason:[NSString stringWithFormat:@"group:%@", reason]];
+    [self beginNativeAnimationAtTime:group.startTime];
     return YES;
   }
 
@@ -287,16 +153,8 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   }
 
   const NSUInteger readyCount = group.transitions.allObjects.count;
-  DebugLog(@"[RNSE:%ld %@] native anim group wait reason=%@ group=%@ ready=%lu expected=%ld",
-           (long)_debugId,
-           RNSharedElementTransitionName(_debugName),
-           reason,
-           _nativeGroup,
-           (unsigned long)readyCount,
-           (long)group.expectedCount);
-
   if (readyCount >= group.expectedCount) {
-    [RNSharedElementTransition startNativeAnimationGroup:group reason:[NSString stringWithFormat:@"group-ready:%@", reason]];
+    [RNSharedElementTransition startNativeAnimationGroup:group];
     return YES;
   }
 
@@ -306,52 +164,47 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(80 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
       RNSharedElementNativeAnimationGroup* timeoutGroup = weakGroup;
       if (timeoutGroup == nil || timeoutGroup.started) return;
-      [RNSharedElementTransition startNativeAnimationGroup:timeoutGroup reason:@"group-timeout"];
+      [RNSharedElementTransition startNativeAnimationGroup:timeoutGroup];
     });
   }
 
   return YES;
 }
 
-- (void)startNativeAnimationNowIfReady:(NSString*)reason
+- (void)startNativeAnimationNowIfReady
 {
   // Drive nodePosition natively once layout/content is ready.
   if (!_nativeDriver) return;
   if (!_nativeAnimationPending) return;
-  if (!_initialLayoutPassCompleted) {
-    DebugLog(@"RNSharedElementTransition: native anim pending (init) %@", reason);
-    return;
-  }
+  if (!_initialLayoutPassCompleted) return;
   // A zero duration is treated as no-op to avoid a zero-length loop.
   if (_nativeDuration <= 0) {
-    DebugLog(@"RNSharedElementTransition: native anim skipped (duration=0) %@", reason);
     _nativeAnimationPending = NO;
     return;
   }
   if (_nativeAnimating) return;
 
-  if ([self queueNativeAnimationInGroup:reason]) {
+  if ([self queueNativeAnimationInGroup]) {
     return;
   }
 
   const CFTimeInterval now = CACurrentMediaTime();
   const CFTimeInterval delaySeconds = _nativeDelay / 1000.0;
   // Delay is in ms from JS, convert to seconds for CoreAnimation clock.
-  [self beginNativeAnimationAtTime:(now + delaySeconds) reason:reason];
+  [self beginNativeAnimationAtTime:(now + delaySeconds)];
 }
 
-- (void)startNativeAnimationIfReady:(NSString*)reason
+- (void)startNativeAnimationIfReady
 {
   if (_nativeAnimationStartScheduled || _nativeAnimating) return;
   _nativeAnimationStartScheduled = YES;
-  NSString* scheduledReason = [reason copy];
   dispatch_async(dispatch_get_main_queue(), ^{
     self->_nativeAnimationStartScheduled = NO;
-    [self startNativeAnimationNowIfReady:scheduledReason];
+    [self startNativeAnimationNowIfReady];
   });
 }
 
-- (void)beginNativeAnimationAtTime:(CFTimeInterval)startTime reason:(NSString*)reason
+- (void)beginNativeAnimationAtTime:(CFTimeInterval)startTime
 {
   if (!_nativeDriver) return;
   if (_nativeAnimating) return;
@@ -363,18 +216,6 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   if (!isfinite(_nativeFrom)) _nativeFrom = _nodePosition;
   if (!isfinite(_nativeTo)) _nativeTo = 1.0f;
 
-  DebugLog(@"[RNSE:%ld %@] native anim start reason=%@ group=%@ from=%.3f to=%.3f duration=%.1f delay=%.1f startTime=%.6f initialVisibleAncestor=%d",
-           (long)_debugId,
-           RNSharedElementTransitionName(_debugName),
-           reason,
-           _nativeGroup ?: @"<none>",
-           _nativeFrom,
-           _nativeTo,
-           _nativeDuration,
-           _nativeDelay,
-           _nativeStartTime,
-           _initialVisibleAncestorIndex);
-
   if (_displayLink == nil) {
     // Use the main run loop so updates align with UIKit rendering.
     _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(onDisplayLink:)];
@@ -382,7 +223,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   }
 }
 
-- (void)stopNativeAnimation:(NSString*)reason
+- (void)stopNativeAnimation
 {
   // Cleanly tear down the display link to avoid leaks or stray updates.
   if (!_nativeAnimating) return;
@@ -391,7 +232,6 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     [_displayLink invalidate];
     _displayLink = nil;
   }
-  DebugLog(@"RNSharedElementTransition: native anim stop (%@)", reason);
 }
 
 - (void)onDisplayLink:(CADisplayLink*)displayLink
@@ -414,11 +254,11 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   }
 
   if (t >= 1.0f) {
-    [self stopNativeAnimation:@"complete"];
+    [self stopNativeAnimation];
   }
 }
 
-- (void)startTransitionIfNeeded:(NSString*)reason
+- (void)startTransitionIfNeeded
 {
   // In Fabric interop, layoutSubviews can arrive with zero-sized bounds.
   // Use superview bounds as a fallback to decide when to bootstrap.
@@ -426,17 +266,9 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   CGRect selfBounds = self.bounds;
   CGRect superBounds = self.superview ? self.superview.bounds : CGRectZero;
   if (CGRectIsEmpty(selfBounds) && CGRectIsEmpty(superBounds)) {
-    DebugLog(@"RNSharedElementTransition: skip bootstrap (%@), bounds=%@ super=%@",
-             reason,
-             NSStringFromCGRect(selfBounds),
-             NSStringFromCGRect(superBounds));
     return;
   }
   _reactFrameSet = YES;
-  DebugLog(@"RNSharedElementTransition: bootstrap (%@), bounds=%@ super=%@",
-           reason,
-           NSStringFromCGRect(selfBounds),
-           NSStringFromCGRect(superBounds));
   // Defer to next run loop so React layout/content requests are ready.
   dispatch_async(dispatch_get_main_queue(), ^{
     for (RNSharedElementTransitionItem* item in self->_items) {
@@ -452,16 +284,13 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     self->_initialLayoutPassCompleted = YES;
     [self updateStyle];
     [self updateNodeVisibility];
-    [self startNativeAnimationIfReady:@"bootstrap"];
+    [self startNativeAnimationIfReady];
   });
 }
 
 - (instancetype)initWithNodeManager:(RNSharedElementNodeManager*)nodeManager
 {
   if ((self = [super init])) {
-    _debugId = RNSharedElementTransitionNextDebugId++;
-    _debugLastGeometryBucket = -1;
-    _debugGeometryLogCount = 0;
     _items = @[
       [[RNSharedElementTransitionItem alloc]initWithNodeManager:nodeManager name:@"startAncestor" isAncestor:YES],
       [[RNSharedElementTransitionItem alloc]initWithNodeManager:nodeManager name:@"endAncestor" isAncestor:YES],
@@ -513,7 +342,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 {
   [super removeFromSuperview];
   // Ensure display link stops if the transition view is removed.
-  [self stopNativeAnimation:@"removeFromSuperview"];
+  [self stopNativeAnimation];
   [self removeFromNativeAnimationGroup];
   
   for (RNSharedElementTransitionItem* item in _items) {
@@ -525,13 +354,13 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 {
   [super layoutSubviews];
   // Bootstrap in layoutSubviews to match Fabric interop render timing.
-  [self startTransitionIfNeeded:@"layoutSubviews"];
+  [self startTransitionIfNeeded];
 }
 
 - (void)dealloc
 {
   // Defensive cleanup to avoid display link retaining this view.
-  [self stopNativeAnimation:@"dealloc"];
+  [self stopNativeAnimation];
   [self removeFromNativeAnimationGroup];
   for (RNSharedElementTransitionItem* item in _items) {
     item.node = nil;
@@ -560,49 +389,33 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 - (void)setStartNode:(RNSharedElementNode *)startNode
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_START]).node = startNode;
-  DebugLog(@"[RNSE:%ld %@] setStartNode %@",
-           (long)_debugId,
-           RNSharedElementTransitionName(_debugName),
-           RNSharedElementNodeString(startNode));
   // Native animation can only start once both nodes/ancestors resolve.
   _nativeAnimationPending = _nativeDriver;
-  [self startNativeAnimationIfReady:@"startNode"];
+  [self startNativeAnimationIfReady];
 }
 
 - (void)setEndNode:(RNSharedElementNode *)endNode
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_END]).node = endNode;
-  DebugLog(@"[RNSE:%ld %@] setEndNode %@",
-           (long)_debugId,
-           RNSharedElementTransitionName(_debugName),
-           RNSharedElementNodeString(endNode));
   // Native animation can only start once both nodes/ancestors resolve.
   _nativeAnimationPending = _nativeDriver;
-  [self startNativeAnimationIfReady:@"endNode"];
+  [self startNativeAnimationIfReady];
 }
 
 - (void)setStartAncestor:(RNSharedElementNode *)startNodeAncestor
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_START_ANCESTOR]).node = startNodeAncestor;
-  DebugLog(@"[RNSE:%ld %@] setStartAncestor %@",
-           (long)_debugId,
-           RNSharedElementTransitionName(_debugName),
-           RNSharedElementNodeString(startNodeAncestor));
   // Ancestor resolution can happen later than nodes in Fabric interop.
   _nativeAnimationPending = _nativeDriver;
-  [self startNativeAnimationIfReady:@"startAncestor"];
+  [self startNativeAnimationIfReady];
 }
 
 - (void)setEndAncestor:(RNSharedElementNode *)endNodeAncestor
 {
   ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_END_ANCESTOR]).node = endNodeAncestor;
-  DebugLog(@"[RNSE:%ld %@] setEndAncestor %@",
-           (long)_debugId,
-           RNSharedElementTransitionName(_debugName),
-           RNSharedElementNodeString(endNodeAncestor));
   // Ancestor resolution can happen later than nodes in Fabric interop.
   _nativeAnimationPending = _nativeDriver;
-  [self startNativeAnimationIfReady:@"endAncestor"];
+  [self startNativeAnimationIfReady];
 }
 
 - (void)setNodePosition:(CGFloat)nodePosition
@@ -614,7 +427,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     }
     // If a non-native update arrives, stop the CADisplayLink to avoid conflict.
     if (_nativeAnimating) {
-      [self stopNativeAnimation:@"nodePosition set"];
+      [self stopNativeAnimation];
     }
     _nodePosition = nodePosition;
     [self updateStyle];
@@ -651,7 +464,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     _nativeDriver = nativeDriver;
     // When enabled, queue a native animation once props+layout are ready.
     _nativeAnimationPending = _nativeDriver;
-    [self startNativeAnimationIfReady:@"nativeDriver"];
+    [self startNativeAnimationIfReady];
   }
 }
 
@@ -661,7 +474,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     _nativeDuration = nativeDuration;
     // Duration changes should restart the pending native animation.
     _nativeAnimationPending = _nativeDriver;
-    [self startNativeAnimationIfReady:@"nativeDuration"];
+    [self startNativeAnimationIfReady];
   }
 }
 
@@ -671,7 +484,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     _nativeDelay = nativeDelay;
     // Delay changes should restart the pending native animation.
     _nativeAnimationPending = _nativeDriver;
-    [self startNativeAnimationIfReady:@"nativeDelay"];
+    [self startNativeAnimationIfReady];
   }
 }
 
@@ -681,7 +494,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     _nativeFrom = nativeFrom;
     // From/to changes should restart the pending native animation.
     _nativeAnimationPending = _nativeDriver;
-    [self startNativeAnimationIfReady:@"nativeFrom"];
+    [self startNativeAnimationIfReady];
   }
 }
 
@@ -691,7 +504,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     _nativeTo = nativeTo;
     // From/to changes should restart the pending native animation.
     _nativeAnimationPending = _nativeDriver;
-    [self startNativeAnimationIfReady:@"nativeTo"];
+    [self startNativeAnimationIfReady];
   }
 }
 
@@ -703,7 +516,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   [self removeFromNativeAnimationGroup];
   _nativeGroup = [nativeGroup copy];
   _nativeAnimationPending = _nativeDriver;
-  [self startNativeAnimationIfReady:@"nativeGroup"];
+  [self startNativeAnimationIfReady];
 }
 
 - (void)setNativeGroupSize:(NSInteger)nativeGroupSize
@@ -711,36 +524,23 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   if (_nativeGroupSize != nativeGroupSize) {
     _nativeGroupSize = nativeGroupSize;
     _nativeAnimationPending = _nativeDriver;
-    [self startNativeAnimationIfReady:@"nativeGroupSize"];
+    [self startNativeAnimationIfReady];
   }
 }
 
 - (void)updateNodeVisibility
 {
   for (RNSharedElementTransitionItem* item in _items) {
-    BOOL previousHidden = item.hidden;
     BOOL hidden = _initialLayoutPassCompleted && item.style != nil && item.content != nil;
     if (hidden && (_animation == RNSharedElementAnimationFadeIn) && [item.name isEqualToString:@"startNode"]) hidden = NO;
     if (hidden && (_animation == RNSharedElementAnimationFadeOut) && [item.name isEqualToString:@"endNode"]) hidden = NO;
     item.hidden = hidden;
-    if (previousHidden != hidden) {
-      DebugLog(@"[RNSE:%ld %@] visibility item=%@ node=%@ hidden=%@ hasStyle=%@ hasContent=%@ animation=%ld pos=%.3f",
-               (long)_debugId,
-               RNSharedElementTransitionName(_debugName),
-               item.name,
-               RNSharedElementNodeString(item.node),
-               RNSharedElementBoolString(hidden),
-               RNSharedElementBoolString(item.style != nil),
-               RNSharedElementBoolString(item.content != nil),
-               (long)_animation,
-               _nodePosition);
-    }
   }
 }
 
 - (void) didSetProps:(NSArray<NSString *> *)changedProps
 {
-  [self startTransitionIfNeeded:@"didSetProps"];
+  [self startTransitionIfNeeded];
   for (RNSharedElementTransitionItem* item in _items) {
     if (_initialLayoutPassCompleted && item.needsLayout) {
       item.needsLayout = NO;
@@ -761,23 +561,14 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   view.layer.minificationFilter = kCAFilterTrilinear;
   view.layer.magnificationFilter = kCAFilterTrilinear;
   
-  // NSLog(@"updateWithImage: %@", NSStringFromCGRect(self.frame));
   view.image = image;
 }
 
 - (void) didLoadContent:(RNSharedElementContent*)content node:(id)node
 {
-  // NSLog(@"didLoadContent: %@", content);
   RNSharedElementTransitionItem* item = [self findItemForNode:node];
   if (item == nil) return;
   item.content = content;
-  DebugLog(@"[RNSE:%ld %@] didLoadContent item=%@ node=%@ type=%@ hasData=%@",
-           (long)_debugId,
-           RNSharedElementTransitionName(_debugName),
-           item.name,
-           RNSharedElementNodeString(node),
-           content ? content.typeName : @"nil",
-           RNSharedElementBoolString(content && content.data));
   if ((content.type == RNSharedElementContentTypeSnapshotImage) || (content.type == RNSharedElementContentTypeRawImage)) {
     UIImage* image = (UIImage*) content.data;
     if (_animation == RNSharedElementAnimationMove) {
@@ -800,24 +591,9 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 
 - (void) didLoadStyle:(RNSharedElementStyle *)style node:(RNSharedElementNode*)node
 {
-  // NSLog(@"didLoadStyle: %@", NSStringFromCGRect(style.layout));
   RNSharedElementTransitionItem* item = [self findItemForNode:node];
   if (item == nil) return;
   item.style = style;
-  DebugLog(@"[RNSE:%ld %@] didLoadStyle item=%@ node=%@ isAncestor=%@ %@",
-           (long)_debugId,
-           RNSharedElementTransitionName(_debugName),
-           item.name,
-           RNSharedElementNodeString(node),
-           RNSharedElementBoolString(item.isAncestor),
-           RNSharedElementStyleString(style));
-  if (RNSharedElementShouldLogActualFrames(_debugName) || RNSharedElementShouldLogActualFrames(node.debugName)) {
-    DebugLog(@"[RNSE:%ld %@] source item=%@ %@",
-             (long)_debugId,
-             RNSharedElementTransitionName(_debugName),
-             item.name,
-             [node debugSourceDescription]);
-  }
   [self updateStyle];
   [self updateNodeVisibility];
 }
@@ -1006,33 +782,14 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   if (_initialVisibleAncestorIndex < 0) {
     RNSharedElementStyle* startAncenstorStyle = startAncestor.style;
     RNSharedElementStyle* endAncestorStyle = endAncestor.style;
-    NSString* visibilityReason = nil;
-    CGFloat startAncestorVisibility = -1.0f;
-    CGFloat endAncestorVisibility = -1.0f;
     if (startAncenstorStyle && !endAncestorStyle) {
       _initialVisibleAncestorIndex = 0;
-      visibilityReason = @"only-start-ancestor-style";
     } else if (!startAncenstorStyle && endAncestorStyle) {
       _initialVisibleAncestorIndex = 1;
-      visibilityReason = @"only-end-ancestor-style";
     } else if (startAncenstorStyle && endAncestorStyle){
-      startAncestorVisibility = [self getAncestorVisibility:startAncenstorStyle];
-      endAncestorVisibility = [self getAncestorVisibility:endAncestorStyle];
+      CGFloat startAncestorVisibility = [self getAncestorVisibility:startAncenstorStyle];
+      CGFloat endAncestorVisibility = [self getAncestorVisibility:endAncestorStyle];
       _initialVisibleAncestorIndex = endAncestorVisibility > startAncestorVisibility ? 1 : 0;
-      visibilityReason = @"visibility-comparison";
-    }
-    if (_initialVisibleAncestorIndex >= 0) {
-      DebugLog(@"[RNSE:%ld %@] initialVisibleAncestor=%d reason=%@ startVisibility=%.4f endVisibility=%.4f startAncestorNode=%@ endAncestorNode=%@ startAncestor={%@} endAncestor={%@}",
-               (long)_debugId,
-               RNSharedElementTransitionName(_debugName),
-               _initialVisibleAncestorIndex,
-               visibilityReason,
-               startAncestorVisibility,
-               endAncestorVisibility,
-               RNSharedElementNodeString(startAncestor.node),
-               RNSharedElementNodeString(endAncestor.node),
-               RNSharedElementStyleString(startAncenstorStyle),
-               RNSharedElementStyleString(endAncestorStyle));
     }
   }
   
@@ -1073,42 +830,6 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     interpolatedContentLayout = endContentLayout;
   }
 
-  NSInteger geometryBucket = (NSInteger)lrint(_nodePosition * 10.0f);
-  BOOL shouldLogGeometry = geometryBucket != _debugLastGeometryBucket || _debugGeometryLogCount < 4;
-  if (shouldLogGeometry) {
-    _debugLastGeometryBucket = geometryBucket;
-    _debugGeometryLogCount++;
-    DebugLog(@"[RNSE:%ld %@] geometry pos=%.3f bucket=%ld nativeAnimating=%@ nativePending=%@ initialVisibleAncestor=%d startItem=%@ endItem=%@ startCompensate=%@ endCompensate=%@ parentBounds=%@ startRaw={%@} endRaw={%@} startAncestor={%@} endAncestor={%@} startLayout=%@ endLayout=%@ startVisible=%@ endVisible=%@ startContent=%@ endContent=%@ interpolated=%@ interpolatedContent=%@ clipInsets={top=%.2f left=%.2f bottom=%.2f right=%.2f}",
-             (long)_debugId,
-             RNSharedElementTransitionName(_debugName),
-             _nodePosition,
-             (long)geometryBucket,
-             RNSharedElementBoolString(_nativeAnimating),
-             RNSharedElementBoolString(_nativeAnimationPending),
-             _initialVisibleAncestorIndex,
-             RNSharedElementNodeString(startItem.node),
-             RNSharedElementNodeString(endItem.node),
-             RNSharedElementBoolString(startCompensate),
-             RNSharedElementBoolString(endCompensate),
-             RNSharedElementRectString(self.superview.bounds),
-             RNSharedElementStyleString(startStyle),
-             RNSharedElementStyleString(endStyle),
-             RNSharedElementStyleString(startAncestor.style),
-             RNSharedElementStyleString(endAncestor.style),
-             RNSharedElementRectString(startLayout),
-             RNSharedElementRectString(endLayout),
-             RNSharedElementRectString(startVisibleLayout),
-             RNSharedElementRectString(endVisibleLayout),
-             RNSharedElementRectString(startContentLayout),
-             RNSharedElementRectString(endContentLayout),
-             RNSharedElementRectString(interpolatedLayout),
-             RNSharedElementRectString(interpolatedContentLayout),
-             interpolatedClipInsets.top,
-             interpolatedClipInsets.left,
-             interpolatedClipInsets.bottom,
-             interpolatedClipInsets.right);
-  }
-  
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
 
@@ -1270,69 +991,6 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     }
   }
   [CATransaction commit];
-
-  if (shouldLogGeometry) {
-    DebugLog(@"[RNSE:%ld %@] draw pos=%.3f bucket=%ld outerFrame=%@ innerFrame=%@ maskFrame=%@ content1Frame=%@ content1Alpha=%.3f content1Class=%@ content2Frame=%@ content2Alpha=%.3f content2Class=%@ primaryImageSize=%@ secondaryImageSize=%@ animation=%ld resize=%ld align=%ld",
-             (long)_debugId,
-             RNSharedElementTransitionName(_debugName),
-             _nodePosition,
-             (long)geometryBucket,
-             RNSharedElementRectString(_outerStyleView.frame),
-             RNSharedElementRectString(_innerClipView.frame),
-             RNSharedElementRectString(_maskLayer.frame),
-             RNSharedElementRectString(contentView1.frame),
-             contentView1.layer.opacity,
-             NSStringFromClass(contentView1.class),
-             contentView2 ? RNSharedElementRectString(contentView2.frame) : @"nil",
-             contentView2 ? contentView2.layer.opacity : 0.0f,
-             contentView2 ? NSStringFromClass(contentView2.class) : @"nil",
-             NSStringFromCGSize(_primaryImageView.image ? _primaryImageView.image.size : CGSizeZero),
-             NSStringFromCGSize(_secondaryImageView.image ? _secondaryImageView.image.size : CGSizeZero),
-             (long)_animation,
-             (long)_resize,
-             (long)_align);
-  }
-
-  BOOL shouldLogActualFrames = shouldLogGeometry && RNSharedElementShouldLogActualFrames(_debugName);
-  if (shouldLogActualFrames) {
-    DebugLog(@"[RNSE:%ld %@] actual pos=%.3f bucket=%ld selfWindow=%@ superWindow=%@ %@ %@ %@ %@ %@ %@",
-             (long)_debugId,
-             RNSharedElementTransitionName(_debugName),
-             _nodePosition,
-             (long)geometryBucket,
-             RNSharedElementWindowFrame(self),
-             RNSharedElementWindowFrame(self.superview),
-             RNSharedElementViewStateString(@"self", self),
-             RNSharedElementViewStateString(@"outer", _outerStyleView),
-             RNSharedElementViewStateString(@"inner", _innerClipView),
-             RNSharedElementViewStateString(@"content1", contentView1),
-             contentView2 ? RNSharedElementViewStateString(@"content2", contentView2) : @"content2=nil",
-             RNSharedElementLayerStateString(@"mask", _maskLayer));
-
-    __weak RNSharedElementTransition* weakSelf = self;
-    UIView* loggedContentView1 = contentView1;
-    UIView* loggedContentView2 = contentView2;
-    CGFloat loggedPosition = _nodePosition;
-    NSInteger loggedBucket = geometryBucket;
-    dispatch_async(dispatch_get_main_queue(), ^{
-      RNSharedElementTransition* strongSelf = weakSelf;
-      if (strongSelf == nil) return;
-      DebugLog(@"[RNSE:%ld %@] actual-async pos=%.3f currentPos=%.3f bucket=%ld selfWindow=%@ superWindow=%@ %@ %@ %@ %@ %@ %@",
-               (long)strongSelf->_debugId,
-               RNSharedElementTransitionName(strongSelf->_debugName),
-               loggedPosition,
-               strongSelf->_nodePosition,
-               (long)loggedBucket,
-               RNSharedElementWindowFrame(strongSelf),
-               RNSharedElementWindowFrame(strongSelf.superview),
-               RNSharedElementViewStateString(@"self", strongSelf),
-               RNSharedElementViewStateString(@"outer", strongSelf->_outerStyleView),
-               RNSharedElementViewStateString(@"inner", strongSelf->_innerClipView),
-               RNSharedElementViewStateString(@"content1", loggedContentView1),
-               loggedContentView2 ? RNSharedElementViewStateString(@"content2", loggedContentView2) : @"content2=nil",
-               RNSharedElementLayerStateString(@"mask", strongSelf->_maskLayer));
-    });
-  }
   
   // Fire events
   if ((startAncestor.style != nil) && !startAncestor.hasCalledOnMeasure) {
@@ -1362,8 +1020,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   // Only after the frame bounds have been set by the RN layout-system
   // we schedule a layout-fetch to run after these updates to ensure
   // that Yoga/UIManager has finished the initial layout pass.
-  //NSLog(@"reactSetFrame: %@", NSStringFromCGRect(frame));
-  [self startTransitionIfNeeded:@"reactSetFrame"];
+  [self startTransitionIfNeeded];
   
   // When react attempts to change the frame on this view,
   // override that and apply our own measured frame and styles

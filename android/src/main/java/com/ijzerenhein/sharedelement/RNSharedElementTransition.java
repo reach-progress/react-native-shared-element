@@ -13,7 +13,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Choreographer;
 import android.os.SystemClock;
-import android.util.Log;
 
 import androidx.annotation.Nullable;
 
@@ -27,9 +26,6 @@ import com.facebook.react.uimanager.events.Event;
 import com.facebook.react.uimanager.events.EventDispatcher;
 
 public class RNSharedElementTransition extends ViewGroup {
-  static private final String LOG_TAG = "RNSharedElementTransition";
-  static private final boolean DEBUG = true;
-  static private int sNextInstanceId = 1;
   // Native-timer animation is used for Fabric interop when JS-driven progress
   // does not update JS state. Uses Choreographer on the UI thread.
 
@@ -49,8 +45,6 @@ public class RNSharedElementTransition extends ViewGroup {
   }
 
   private final RNSharedElementNodeManager mNodeManager;
-  private final int mInstanceId;
-  private final long mCreatedAtMs = SystemClock.uptimeMillis();
   private RNSharedElementAnimation mAnimation = RNSharedElementAnimation.MOVE;
   private RNSharedElementResize mResize = RNSharedElementResize.STRETCH;
   private RNSharedElementAlign mAlign = RNSharedElementAlign.CENTER_CENTER;
@@ -64,13 +58,7 @@ public class RNSharedElementTransition extends ViewGroup {
   private final RNSharedElementView mStartView;
   private final RNSharedElementView mEndView;
   private int mInitialVisibleAncestorIndex = -1;
-  private boolean mHasLoggedFirstRenderableLayout = false;
-  private boolean mLoggedBootstrapWaitForParent = false;
-  private boolean mLoggedBootstrapWaitForSize = false;
   private boolean mHasDrawnRenderableFrame = false;
-  private boolean mHasLoggedVisibilityDefer = false;
-  private int mLastLoggedLayoutBucket = -1;
-  private boolean mShouldLogRenderSnapshot = false;
 
   // Native-timer animation state for Fabric interop.
   private boolean mNativeDriver = false;
@@ -116,7 +104,6 @@ public class RNSharedElementTransition extends ViewGroup {
 
   public RNSharedElementTransition(ThemedReactContext context, RNSharedElementNodeManager nodeManager) {
     super(context);
-    mInstanceId = sNextInstanceId++;
     mNodeManager = nodeManager;
     mItems.add(new RNSharedElementTransitionItem(nodeManager, "start"));
     mItems.add(new RNSharedElementTransitionItem(nodeManager, "end"));
@@ -126,19 +113,11 @@ public class RNSharedElementTransition extends ViewGroup {
 
     mEndView = new RNSharedElementView(context);
     addView(mEndView);
-    log("created");
-  }
-
-  private void log(String message) {
-    if (!DEBUG) return;
-    long elapsed = SystemClock.uptimeMillis() - mCreatedAtMs;
-    Log.d(LOG_TAG, "#" + mInstanceId + " t+" + elapsed + "ms " + message);
   }
 
   void releaseData() {
     // Defensive cleanup to stop any pending frame callbacks.
-    log("releaseData");
-    stopNativeAnimation("releaseData");
+    stopNativeAnimation();
     for (RNSharedElementTransitionItem item : mItems) {
       item.setNode(null);
     }
@@ -149,24 +128,15 @@ public class RNSharedElementTransition extends ViewGroup {
   }
 
   void setItemNode(Item item, RNSharedElementNode node) {
-    log(
-      "setItemNode item="
-        + item
-        + " node="
-        + (node != null ? node.getReactTag() : "null")
-        + " initialLayout="
-        + mInitialLayoutPassCompleted
-    );
     mItems.get(item.getValue()).setNode(node);
     mHasDrawnRenderableFrame = false;
-    mHasLoggedVisibilityDefer = false;
     // Nodes/ancestors may resolve after layout in Fabric; queue start.
     mNativeAnimationPending = mNativeDriver;
     // Kick off style/content fetch immediately so data can be ready by the
     // time the first layout pass completes. This reduces first-frame lag where
     // the destination is visible before shared elements are rendered.
     requestStylesAndContent(true);
-    startNativeAnimationIfReady("setItemNode");
+    startNativeAnimationIfReady();
   }
 
   void setAnimation(final RNSharedElementAnimation animation) {
@@ -207,86 +177,39 @@ public class RNSharedElementTransition extends ViewGroup {
     return isItemRenderable(startItem) || isItemRenderable(endItem);
   }
 
-  private void tryCompleteInitialLayoutPass(String reason) {
+  private void tryCompleteInitialLayoutPass() {
     if (mInitialLayoutPassCompleted) return;
     View parent = (View) getParent();
     if (parent == null) {
-      if (!mLoggedBootstrapWaitForParent) {
-        mLoggedBootstrapWaitForParent = true;
-        log("initial layout bootstrap waiting reason=" + reason + " parent=null");
-      }
       return;
     }
-    int width = getWidth();
-    int height = getHeight();
-    if ((width <= 0 || height <= 0) && !mLoggedBootstrapWaitForSize) {
-      mLoggedBootstrapWaitForSize = true;
-      log(
-        "initial layout bootstrap proceeding with size="
-          + width
-          + "x"
-          + height
-          + " reason="
-          + reason
-      );
-    }
     mInitialLayoutPassCompleted = true;
-    mLoggedBootstrapWaitForParent = false;
-    mLoggedBootstrapWaitForSize = false;
-    log(
-      "initial layout bootstrap completed reason="
-        + reason
-        + " size="
-        + width
-        + "x"
-        + height
-    );
     requestStylesAndContent(true);
     updateLayout();
     updateNodeVisibility();
   }
 
-  private void startNativeAnimationIfReady(String reason) {
+  private void startNativeAnimationIfReady() {
     // Drive nodePosition natively when layout/content are ready.
     if (!mNativeDriver) {
-      log("native anim skip reason=" + reason + " (nativeDriver=false)");
       return;
     }
     if (!mNativeAnimationPending) {
-      log("native anim skip reason=" + reason + " (pending=false)");
       return;
     }
-    tryCompleteInitialLayoutPass("startNativeAnimationIfReady:" + reason);
+    tryCompleteInitialLayoutPass();
     if (!mInitialLayoutPassCompleted) {
-      log("native anim wait reason=" + reason + " (initialLayout=false)");
       return;
     }
     // Zero duration means no-op to avoid a tight loop.
     if (mNativeDuration <= 0.0f) {
-      log("native anim skip reason=" + reason + " (duration<=0)");
       mNativeAnimationPending = false;
       return;
     }
     if (!hasRenderableSnapshot()) {
-      RNSharedElementTransitionItem startItem = mItems.get(Item.START.getValue());
-      RNSharedElementTransitionItem endItem = mItems.get(Item.END.getValue());
-      log(
-        "native anim wait reason="
-          + reason
-          + " (renderable=false startStyle="
-          + (startItem.getStyle() != null)
-          + " startContent="
-          + (startItem.getContent() != null)
-          + " endStyle="
-          + (endItem.getStyle() != null)
-          + " endContent="
-          + (endItem.getContent() != null)
-          + ")"
-      );
       return;
     }
     if (mNativeAnimating) {
-      log("native anim skip reason=" + reason + " (alreadyAnimating=true)");
       return;
     }
 
@@ -298,18 +221,6 @@ public class RNSharedElementTransition extends ViewGroup {
 
     if (Float.isNaN(mNativeFrom)) mNativeFrom = mNodePosition;
     if (Float.isNaN(mNativeTo)) mNativeTo = 1.0f;
-    log(
-      "native anim start reason="
-        + reason
-        + " from="
-        + mNativeFrom
-        + " to="
-        + mNativeTo
-        + " duration="
-        + mNativeDuration
-        + " delay="
-        + mNativeDelay
-    );
 
     if (mChoreographer == null) {
       // Use Choreographer to sync with UI rendering.
@@ -318,11 +229,10 @@ public class RNSharedElementTransition extends ViewGroup {
     mChoreographer.postFrameCallback(mFrameCallback);
   }
 
-  private void stopNativeAnimation(String reason) {
+  private void stopNativeAnimation() {
     // Remove callbacks to avoid leaks or duplicate frames.
     if (!mNativeAnimating) return;
     mNativeAnimating = false;
-    log("native anim stop reason=" + reason);
     if (mChoreographer != null) {
       mChoreographer.removeFrameCallback(mFrameCallback);
     }
@@ -350,8 +260,7 @@ public class RNSharedElementTransition extends ViewGroup {
     }
 
     if (t >= 1.0f) {
-      log("native anim frame complete value=" + value);
-      stopNativeAnimation("complete");
+      stopNativeAnimation();
     } else if (mChoreographer != null) {
       mChoreographer.postFrameCallback(mFrameCallback);
     }
@@ -361,9 +270,8 @@ public class RNSharedElementTransition extends ViewGroup {
     // When enabled, we defer start until layout + nodes are ready.
     if (mNativeDriver != nativeDriver) {
       mNativeDriver = nativeDriver;
-      log("setNativeDriver value=" + nativeDriver);
       mNativeAnimationPending = mNativeDriver;
-      startNativeAnimationIfReady("nativeDriver");
+      startNativeAnimationIfReady();
     }
   }
 
@@ -371,9 +279,8 @@ public class RNSharedElementTransition extends ViewGroup {
     // Any timing change should restart the pending native animation.
     if (mNativeDuration != nativeDuration) {
       mNativeDuration = nativeDuration;
-      log("setNativeDuration value=" + nativeDuration);
       mNativeAnimationPending = mNativeDriver;
-      startNativeAnimationIfReady("nativeDuration");
+      startNativeAnimationIfReady();
     }
   }
 
@@ -381,9 +288,8 @@ public class RNSharedElementTransition extends ViewGroup {
     // Any timing change should restart the pending native animation.
     if (mNativeDelay != nativeDelay) {
       mNativeDelay = nativeDelay;
-      log("setNativeDelay value=" + nativeDelay);
       mNativeAnimationPending = mNativeDriver;
-      startNativeAnimationIfReady("nativeDelay");
+      startNativeAnimationIfReady();
     }
   }
 
@@ -391,9 +297,8 @@ public class RNSharedElementTransition extends ViewGroup {
     // Any timing change should restart the pending native animation.
     if (mNativeFrom != nativeFrom) {
       mNativeFrom = nativeFrom;
-      log("setNativeFrom value=" + nativeFrom);
       mNativeAnimationPending = mNativeDriver;
-      startNativeAnimationIfReady("nativeFrom");
+      startNativeAnimationIfReady();
     }
   }
 
@@ -401,9 +306,8 @@ public class RNSharedElementTransition extends ViewGroup {
     // Any timing change should restart the pending native animation.
     if (mNativeTo != nativeTo) {
       mNativeTo = nativeTo;
-      log("setNativeTo value=" + nativeTo);
       mNativeAnimationPending = mNativeDriver;
-      startNativeAnimationIfReady("nativeTo");
+      startNativeAnimationIfReady();
     }
   }
 
@@ -414,12 +318,10 @@ public class RNSharedElementTransition extends ViewGroup {
         return;
       }
       if (mNativeAnimating) {
-        stopNativeAnimation("nodePosition set");
+        stopNativeAnimation();
       }
-      //Log.d(LOG_TAG, "setNodePosition " + nodePosition + ", mInitialLayoutPassCompleted: " + mInitialLayoutPassCompleted);
       mNodePosition = nodePosition;
       mInitialNodePositionSet = true;
-      log("setNodePosition value=" + nodePosition);
       updateLayout();
     }
   }
@@ -433,20 +335,6 @@ public class RNSharedElementTransition extends ViewGroup {
 
   @Override
   protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-    log(
-      "onLayout changed="
-        + changed
-        + " frame=["
-        + left
-        + ","
-        + top
-        + ","
-        + right
-        + ","
-        + bottom
-        + "] reactLayoutSet="
-        + mReactLayoutSet
-    );
     if (!mReactLayoutSet) {
       mReactLayoutSet = true;
 
@@ -454,13 +342,10 @@ public class RNSharedElementTransition extends ViewGroup {
       // requesting the layout and content
       requestStylesAndContent(true);
       mInitialLayoutPassCompleted = true;
-      mLoggedBootstrapWaitForParent = false;
-      mLoggedBootstrapWaitForSize = false;
-      log("initial layout pass completed");
       updateLayout();
       updateNodeVisibility();
       // Fabric interop bootstrap point for native animation.
-      startNativeAnimationIfReady("onLayout");
+      startNativeAnimationIfReady();
     }
   }
 
@@ -472,85 +357,53 @@ public class RNSharedElementTransition extends ViewGroup {
   @Override
   protected void onAttachedToWindow() {
     super.onAttachedToWindow();
-    log("onAttachedToWindow");
-    tryCompleteInitialLayoutPass("onAttachedToWindow");
-    startNativeAnimationIfReady("onAttachedToWindow");
+    tryCompleteInitialLayoutPass();
+    startNativeAnimationIfReady();
   }
 
   @Override
   protected void onDetachedFromWindow() {
     super.onDetachedFromWindow();
-    log("onDetachedFromWindow");
-    stopNativeAnimation("onDetachedFromWindow");
+    stopNativeAnimation();
   }
 
   @Override
   protected void dispatchDraw(Canvas canvas) {
-    //Log.d(LOG_TAG, "dispatchDraw, mRequiresClipping: " + mRequiresClipping + ", width: " + getWidth() + ", height: " + getHeight());
     if (mRequiresClipping) {
       canvas.clipRect(0, 0, getWidth(), getHeight());
     }
     super.dispatchDraw(canvas);
     if (!mHasDrawnRenderableFrame && hasRenderableSnapshot()) {
       mHasDrawnRenderableFrame = true;
-      log("first renderable dispatchDraw");
       updateNodeVisibility();
     }
-
-    // Draw content
-    //Paint backgroundPaint = new Paint();
-    //backgroundPaint.setColor(Color.argb(128, 255, 0, 0));
-    //canvas.drawRect(0, 0, getWidth(), getHeight(), backgroundPaint);
   }
 
   private void requestStylesAndContent(boolean force) {
     if (!mInitialLayoutPassCompleted && !force) {
-      log("requestStylesAndContent skipped force=false initialLayout=false");
       return;
     }
-    log(
-      "requestStylesAndContent force="
-        + force
-        + " initialLayout="
-        + mInitialLayoutPassCompleted
-    );
     for (final RNSharedElementTransitionItem item : mItems) {
       if (item.getNeedsStyle()) {
-        log("requestStyle item=" + item.getName());
         item.setNeedsStyle(false);
         item.getNode().requestStyle(args -> {
           RNSharedElementStyle style = (RNSharedElementStyle) args[0];
           item.setStyle(style);
-          log(
-            "didLoadStyle item="
-              + item.getName()
-              + " layout="
-              + (style != null ? style.layout : "null")
-          );
-          tryCompleteInitialLayoutPass("didLoadStyle");
+          tryCompleteInitialLayoutPass();
           updateLayout();
           updateNodeVisibility();
-          startNativeAnimationIfReady("didLoadStyle");
+          startNativeAnimationIfReady();
         });
       }
       if (item.getNeedsContent()) {
-        log("requestContent item=" + item.getName());
         item.setNeedsContent(false);
         item.getNode().requestContent(args -> {
           RNSharedElementContent content = (RNSharedElementContent) args[0];
           item.setContent(content);
-          log(
-            "didLoadContent item="
-              + item.getName()
-              + " view="
-              + ((content != null && content.view != null)
-                ? content.view.getClass().getSimpleName()
-                : "null")
-          );
-          tryCompleteInitialLayoutPass("didLoadContent");
+          tryCompleteInitialLayoutPass();
           updateLayout();
           updateNodeVisibility();
-          startNativeAnimationIfReady("didLoadContent");
+          startNativeAnimationIfReady();
         });
       }
     }
@@ -558,7 +411,6 @@ public class RNSharedElementTransition extends ViewGroup {
 
   private void updateLayout() {
     if (!mInitialLayoutPassCompleted) {
-      log("updateLayout waiting initialLayout=false");
       return;
     }
 
@@ -569,7 +421,6 @@ public class RNSharedElementTransition extends ViewGroup {
     // Get parent offset
     View parent = (View) getParent();
     if (parent == null) {
-      log("updateLayout waiting parent=null");
       return;
     }
     parent.getLocationInWindow(mParentOffset);
@@ -578,7 +429,6 @@ public class RNSharedElementTransition extends ViewGroup {
     RNSharedElementStyle startStyle = startItem.getStyle();
     RNSharedElementStyle endStyle = endItem.getStyle();
     if ((startStyle == null) && (endStyle == null)) {
-      log("updateLayout waiting startStyle=null endStyle=null");
       return;
     }
 
@@ -588,22 +438,6 @@ public class RNSharedElementTransition extends ViewGroup {
     if ((mAnimation == RNSharedElementAnimation.MOVE) && (startContent == null) && (endContent != null)) {
       startContent = endContent;
     }
-    if (!mHasLoggedFirstRenderableLayout) {
-      log(
-        "updateLayout first-renderable-state startStyle="
-          + (startStyle != null)
-          + " endStyle="
-          + (endStyle != null)
-          + " startContent="
-          + (startContent != null)
-          + " endContent="
-          + (endContent != null)
-          + " nodePosition="
-          + mNodePosition
-      );
-      mHasLoggedFirstRenderableLayout = true;
-    }
-
     // Determine starting scene that is currently visible to the user
     if (mInitialVisibleAncestorIndex < 0) {
       if ((startStyle != null) && (endStyle == null)) {
@@ -651,18 +485,6 @@ public class RNSharedElementTransition extends ViewGroup {
             )
             : RNSharedElementStyle.EMPTY_RECTF;
 
-    logLayoutSnapshot(
-      "source",
-      startStyle,
-      endStyle,
-      startContent,
-      endContent,
-      startLayout,
-      endLayout,
-      startContentLayout,
-      endContentLayout
-    );
-
     // Get interpolated layout
     RectF interpolatedLayout;
     RectF interpolatedContentLayout;
@@ -707,8 +529,6 @@ public class RNSharedElementTransition extends ViewGroup {
       mRequiresClipping = false;
     }
 
-    //Log.d(LOG_TAG, "updateLayout: " + mNodePosition);
-
     // Update outer viewgroup layout. The outer viewgroup hosts 2 inner views
     // which draw the content & elevation. The outer viewgroup performs additional
     // clipping on these views.
@@ -748,14 +568,6 @@ public class RNSharedElementTransition extends ViewGroup {
       RectF startRenderLayout = mResize == RNSharedElementResize.CLIP
               ? interpolatedContentLayout
               : interpolatedLayout;
-      logRenderSnapshot(
-        "start",
-        interpolatedLayout,
-        interpolatedContentLayout,
-        parentLayout,
-        startRenderLayout,
-        startFrame
-      );
       mStartView.updateViewAndDrawable(
               startRenderLayout,
               parentLayout,
@@ -778,14 +590,6 @@ public class RNSharedElementTransition extends ViewGroup {
       RectF endRenderLayout = mResize == RNSharedElementResize.CLIP
               ? interpolatedContentLayout
               : interpolatedLayout;
-      logRenderSnapshot(
-        "end",
-        interpolatedLayout,
-        interpolatedContentLayout,
-        parentLayout,
-        endRenderLayout,
-        endFrame
-      );
       mEndView.updateViewAndDrawable(
               endRenderLayout,
               parentLayout,
@@ -826,101 +630,9 @@ public class RNSharedElementTransition extends ViewGroup {
     }
   }
 
-  private boolean shouldLogLayoutSnapshot() {
-    mShouldLogRenderSnapshot = false;
-    if (!DEBUG) return false;
-    int bucket = Math.round(mNodePosition * 10.0f);
-    if (bucket == mLastLoggedLayoutBucket) return false;
-    mLastLoggedLayoutBucket = bucket;
-    mShouldLogRenderSnapshot = true;
-    return true;
-  }
-
-  private void logLayoutSnapshot(
-    String phase,
-    RNSharedElementStyle startStyle,
-    RNSharedElementStyle endStyle,
-    RNSharedElementContent startContent,
-    RNSharedElementContent endContent,
-    RectF startLayout,
-    RectF endLayout,
-    RectF startContentLayout,
-    RectF endContentLayout
-  ) {
-    if (!shouldLogLayoutSnapshot()) return;
-    log(
-      phase
-        + " position="
-        + mNodePosition
-        + " animation="
-        + mAnimation
-        + " resize="
-        + mResize
-        + " align="
-        + mAlign
-        + " initialVisibleAncestor="
-        + mInitialVisibleAncestorIndex
-        + " startScaleType="
-        + (startStyle != null ? startStyle.scaleType : null)
-        + " endScaleType="
-        + (endStyle != null ? endStyle.scaleType : null)
-        + " startLayout="
-        + startLayout
-        + " endLayout="
-        + endLayout
-        + " startContentSize="
-        + describeContentSize(startContent)
-        + " endContentSize="
-        + describeContentSize(endContent)
-        + " startContentLayout="
-        + startContentLayout
-        + " endContentLayout="
-        + endContentLayout
-    );
-  }
-
-  private void logRenderSnapshot(
-    String item,
-    RectF interpolatedLayout,
-    RectF interpolatedContentLayout,
-    RectF parentLayout,
-    RectF renderLayout,
-    Rect frame
-  ) {
-    if (!DEBUG || !mShouldLogRenderSnapshot) return;
-    log(
-      "render item="
-        + item
-        + " position="
-        + mNodePosition
-        + " outer="
-        + interpolatedLayout
-        + " content="
-        + interpolatedContentLayout
-        + " parent="
-        + parentLayout
-        + " render="
-        + renderLayout
-        + " frame="
-        + frame
-        + " requiresClipping="
-        + mRequiresClipping
-    );
-  }
-
-  private String describeContentSize(RNSharedElementContent content) {
-    if (content == null) return "null";
-    return content.size + " view=" + (content.view != null ? content.view.getClass().getSimpleName() : "null");
-  }
-
   private void updateNodeVisibility() {
     boolean shouldDeferHide = !mHasDrawnRenderableFrame;
-    if (shouldDeferHide && !mHasLoggedVisibilityDefer && hasRenderableSnapshot()) {
-      mHasLoggedVisibilityDefer = true;
-      log("visibility defer waiting first renderable draw");
-    }
     for (RNSharedElementTransitionItem item : mItems) {
-      boolean previousHidden = item.getHidden();
       boolean hidden = mInitialLayoutPassCompleted
               && (item.getStyle() != null)
               && (item.getContent() != null);
@@ -930,18 +642,6 @@ public class RNSharedElementTransition extends ViewGroup {
       if (hidden && (mAnimation == RNSharedElementAnimation.FADE_OUT) && item.getName().equals("end"))
         hidden = false;
       item.setHidden(hidden);
-      if (previousHidden != hidden) {
-        log(
-          "visibility item="
-            + item.getName()
-            + " hidden="
-            + hidden
-            + " hasStyle="
-            + (item.getStyle() != null)
-            + " hasContent="
-            + (item.getContent() != null)
-        );
-      }
     }
   }
 
@@ -1037,7 +737,6 @@ public class RNSharedElementTransition extends ViewGroup {
     eventData.putMap("style", styleData);
     EventDispatcher eventDispatcher = UIManagerHelper.getEventDispatcherForReactTag(reactContext, getId());
     if (eventDispatcher == null) {
-      log("fireMeasureEvent skipped eventDispatcher=null");
       return;
     }
     int surfaceId = UIManagerHelper.getSurfaceId(this);

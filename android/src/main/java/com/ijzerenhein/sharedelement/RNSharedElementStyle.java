@@ -17,8 +17,6 @@ import com.facebook.react.views.image.ImageResizeMode;
 import com.facebook.react.modules.i18nmanager.I18nUtil;
 
 public class RNSharedElementStyle {
-  // static private final String LOG_TAG = "RNSharedElementStyle";
-
   static Rect EMPTY_RECT = new Rect();
   static RectF EMPTY_RECTF = new RectF();
 

@@ -1,6 +1,5 @@
 package com.ijzerenhein.sharedelement;
 
-// import android.util.Log;
 import android.view.View;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -45,8 +44,6 @@ class RNSharedElementDrawable extends Drawable {
       return value;
     }
   }
-
-  // static final private String LOG_TAG = "RNSharedElementDrawable";
 
   private ThemedReactContext mContext = null;
   private View mView = null;
@@ -99,14 +96,12 @@ class RNSharedElementDrawable extends Drawable {
       switch (viewType) {
         case REACTIMAGEVIEW:
         case IMAGEVIEW:
-          //Log.d(LOG_TAG, "drawableChanged, viewType: " + viewType + ", changes: " + mStyle.compare(style));
           invalidated = (mStyle.compare(style) &
                   (RNSharedElementStyle.PROP_BORDER
                           | RNSharedElementStyle.PROP_BACKGROUND_COLOR
                           | RNSharedElementStyle.PROP_SCALETYPE)) != 0;
           break;
         case PLAIN:
-          //Log.d(LOG_TAG, "drawableChanged, viewType: " + viewType + ", changes: " + mStyle.compare(style));
           invalidated = (mStyle.compare(style) &
                   (RNSharedElementStyle.PROP_BORDER
                           | RNSharedElementStyle.PROP_BACKGROUND_COLOR)) != 0;
@@ -216,7 +211,6 @@ class RNSharedElementDrawable extends Drawable {
 
   @Override
   public void draw(Canvas canvas) {
-    //Log.d(LOG_TAG, "draw, viewType: " + mViewType + ", position: " + mPosition);
     switch (mViewType) {
       case REACTIMAGEVIEW:
         drawReactImageView(canvas);

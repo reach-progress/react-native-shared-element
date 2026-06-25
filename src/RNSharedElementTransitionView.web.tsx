@@ -66,7 +66,6 @@ export class RNSharedElementTransitionView extends React.Component<
   };
 
   render() {
-    // console.log("RNSharedElementTransitionView.render");
     return <View ref={this.onSetRef} />;
   }
 }

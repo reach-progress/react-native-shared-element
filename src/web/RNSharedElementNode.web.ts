@@ -67,7 +67,6 @@ export class RNSharedElementNode {
         // @ts-ignore
         element = element.childNodes[0];
       } else if (element.childNodes.length <= 0) {
-        console.log("Child for parent doesnt exist");
         return null;
       }
     }
@@ -101,7 +100,6 @@ export class RNSharedElementNode {
       this.styleCallbacks = this.styleCallbacks || [];
       this.styleCallbacks.push(resolve);
       if (!this.fetchInitialStyle()) {
-        console.debug("Failed to fetch style");
         //startRetryLoop();
       }
     });
@@ -117,7 +115,6 @@ export class RNSharedElementNode {
     const rect = element.getBoundingClientRect();
     // const ancestorTransform = ancestor.style.transform;
     const ancestorRect = ancestor.getBoundingClientRect();
-    // console.log("ancestorTransform: ", ancestor.style, ancestorRect);
     const translateX = ancestorRect.x; // TODO
     const translateY = ancestorRect.y; // TODO
     const layout = new Rect({
@@ -133,8 +130,6 @@ export class RNSharedElementNode {
       // @ts-ignore
       window.getComputedStyle(element, null)
     );
-
-    // console.debug("Style fetched: ", style);
 
     // Update cache
     this.styleCache = style;
@@ -171,8 +166,6 @@ export class RNSharedElementNode {
 
     // Create content
     const content = new RNSharedElementContent(element, size);
-
-    // console.debug("Content fetched: ", content);
 
     // Update cache
     this.contentCache = content;

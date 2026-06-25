@@ -11,7 +11,7 @@
 @interface RNSharedElementNodeManager : NSObject
 
 - (instancetype)init;
-- (RNSharedElementNode*) acquire:(NSNumber*) reactTag view:(UIView*)view isParent:(BOOL)isParent debugName:(NSString*)debugName;
+- (RNSharedElementNode*) acquire:(NSNumber*) reactTag view:(UIView*)view isParent:(BOOL)isParent;
 - (long) release:(RNSharedElementNode*) node;
 
 @end

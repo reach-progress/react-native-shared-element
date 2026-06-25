@@ -14,13 +14,11 @@ type NativeTransitionNode = {
     nodeHandle: number;
     isParent: boolean;
     nodeStyle?: Record<string, unknown>;
-    debugName?: string;
   };
   ancestor?: {
     nodeHandle: number;
     isParent: boolean;
     nodeStyle?: Record<string, unknown>;
-    debugName?: string;
   };
 };
 

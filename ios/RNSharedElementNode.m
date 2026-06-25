@@ -5,7 +5,6 @@
 
 #import <UIKit/UIKit.h>
 #import <React/RCTView.h>
-#import <React/UIView+React.h>
 #import "RNSharedElementNode.h"
 #import "RNSharedElementContent.h"
 #import <QuartzCore/QuartzCore.h>
@@ -56,79 +55,14 @@
 
 NSArray* _imageResolvers;
 
-static NSString* RNSharedElementNodeBoolString(BOOL value)
-{
-  return value ? @"YES" : @"NO";
-}
-
-static NSString* RNSharedElementNodeRectString(CGRect rect)
-{
-  return CGRectIsNull(rect) ? @"null" : NSStringFromCGRect(rect);
-}
-
-static NSString* RNSharedElementNodeWindowFrame(UIView* view)
-{
-  if (view == nil || view.window == nil) return @"nil";
-  return RNSharedElementNodeRectString([view.window convertRect:view.bounds fromView:view]);
-}
-
-static NSString* RNSharedElementNodePresentationWindowFrame(UIView* view)
-{
-  if (view == nil || view.window == nil || view.superview == nil) return @"nil";
-  CALayer* presentationLayer = view.layer.presentationLayer;
-  if (presentationLayer == nil) return @"nil";
-  return RNSharedElementNodeRectString([view.window convertRect:presentationLayer.frame fromView:view.superview]);
-}
-
-static NSString* RNSharedElementNodeViewSummary(UIView* view)
-{
-  if (view == nil) return @"nil";
-  NSString* scrollState = @"";
-  if ([view isKindOfClass:[UIScrollView class]]) {
-    UIScrollView* scrollView = (UIScrollView*)view;
-    scrollState = [NSString stringWithFormat:@" contentOffset=%@ adjustedInset=%@",
-                   NSStringFromCGPoint(scrollView.contentOffset),
-                   NSStringFromUIEdgeInsets(scrollView.adjustedContentInset)];
-  }
-  return [NSString stringWithFormat:@"%@:%p tag=%@ hidden=%@ alpha=%.3f clips=%@ frame=%@ bounds=%@ center=%@ windowFrame=%@ presentationWindowFrame=%@ transform=%@%@",
-          NSStringFromClass(view.class),
-          view,
-          view.reactTag,
-          RNSharedElementNodeBoolString(view.hidden),
-          view.alpha,
-          RNSharedElementNodeBoolString(view.clipsToBounds || view.layer.masksToBounds),
-          RNSharedElementNodeRectString(view.frame),
-          RNSharedElementNodeRectString(view.bounds),
-          NSStringFromCGPoint(view.center),
-          RNSharedElementNodeWindowFrame(view),
-          RNSharedElementNodePresentationWindowFrame(view),
-          NSStringFromCGAffineTransform(view.transform),
-          scrollState];
-}
-
-static NSString* RNSharedElementNodeHierarchySummary(UIView* view)
-{
-  if (view == nil) return @"nil";
-  NSMutableArray<NSString*>* parts = [NSMutableArray new];
-  UIView* current = view;
-  NSInteger depth = 0;
-  while (current != nil && depth < 8) {
-    [parts addObject:[NSString stringWithFormat:@"[%ld] %@", (long)depth, RNSharedElementNodeViewSummary(current)]];
-    current = current.superview;
-    depth++;
-  }
-  return [parts componentsJoinedByString:@" <- "];
-}
-
 + (void) setImageResolvers:(NSArray*) imageResolvers
 {
   _imageResolvers = imageResolvers;
 }
 
-- (instancetype)init:(NSNumber *)reactTag view:(UIView*) view isParent:(BOOL)isParent debugName:(NSString*)debugName
+- (instancetype)init:(NSNumber *)reactTag view:(UIView*) view isParent:(BOOL)isParent
 {
   _reactTag = reactTag;
-  _debugName = [debugName copy];
   _sourceView = view;
   _isParent = isParent;
   _refCount = 1;
@@ -149,19 +83,6 @@ static NSString* RNSharedElementNodeHierarchySummary(UIView* view)
 - (UIView*) view
 {
   return _resolvedSource ? _resolvedSource.view : nil;
-}
-
-- (NSString*)debugSourceDescription
-{
-  return [NSString stringWithFormat:@"reactTag=%@ debugName=%@ isParent=%@ source={%@} resolved={%@} content={%@} sourceHierarchy=%@ resolvedHierarchy=%@",
-          _reactTag,
-          _debugName ?: @"<unnamed-node>",
-          RNSharedElementNodeBoolString(_isParent),
-          RNSharedElementNodeViewSummary(_sourceView),
-          RNSharedElementNodeViewSummary(_resolvedSource.view),
-          RNSharedElementNodeViewSummary(_resolvedSource.contentView),
-          RNSharedElementNodeHierarchySummary(_sourceView),
-          RNSharedElementNodeHierarchySummary(_resolvedSource.view)];
 }
 
 - (void) updateResolvedSource:(BOOL)noReset
@@ -223,7 +144,6 @@ static NSString* RNSharedElementNodeHierarchySummary(UIView* view)
         }
       }
       if (CGRectEqualToRect(subview.frame, bounds)) {
-        //NSLog(@"RESOLVED IMAGE VIEW, frame: %@, bounds: %@", NSStringFromCGRect(subview.frame), NSStringFromCGRect(bounds));
         return [RNSharedElementNodeResolvedSource sourceWithView:view hasChildImageView:YES];
       }
     }
@@ -281,7 +201,6 @@ static NSString* RNSharedElementNodeHierarchySummary(UIView* view)
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
 {
-  //NSLog(@"observeValueForKeyPath: %@, changed: %@", keyPath, change);
   if ([keyPath isEqualToString:@"image"]) {
     [self updateContent];
   } else {
@@ -374,22 +293,10 @@ static NSString* RNSharedElementNodeHierarchySummary(UIView* view)
     UIView* snapshotView = [view snapshotViewAfterScreenUpdates:NO];
     content = [[RNSharedElementContent alloc]initWithData:snapshotView type:RNSharedElementContentTypeSnapshotView insets:UIEdgeInsetsZero];
   }
-  /*else {
-   NSLog(@"drawViewHierarchyInRect: bounds: %@", NSStringFromCGRect(bounds));
-   UIGraphicsBeginImageContextWithOptions(bounds.size, NO, 0.0f);
-   BOOL res = [view drawViewHierarchyInRect:bounds afterScreenUpdates:NO]; // NEVER USE YES, IT CREATED VISUAL ARTEFACTS ON THE CREEN
-   UIImage* image = res ? UIGraphicsGetImageFromCurrentImageContext() : nil;
-   UIGraphicsEndImageContext();
-   NSLog(@"drawViewHierarchyInRect: RESULT: %li", res);
-   content = image;
-   contentType = RNSharedElementContentTypeSnapshotImage;
-   }*/
-  
   // If the content could not be obtained, then try again later
   if (content == nil || content.data == nil) {
     return [self updateRetryLoop];
   }
-  // NSLog(@"Content fetched: %@, size: %@", content, NSStringFromCGSize(bounds.size));
   
   _contentCache = content;
   _contentCacheTimeInterval = CACurrentMediaTime();
@@ -444,8 +351,6 @@ static NSString* RNSharedElementNodeHierarchySummary(UIView* view)
   } else {
     style.contentMode = view.contentMode;
   }
-  /* NSLog(@"Style fetched, window: %@, alpha: %f, hidden: %@, parent: %@, layout: %@, realSize: %@, opacity: %lf, transform: %@, borderWidth: %lf, contentMode: %ld", view.window, view.alpha, @(view.hidden), @(_isParent), NSStringFromCGRect(layout), NSStringFromCGSize(style.size), style.opacity, [RNSharedElementStyle stringFromTransform:style.transform], style.borderWidth, style.contentMode); */
-  
   _styleCache = style;
   _styleCacheTimeInterval = CACurrentMediaTime();
   
@@ -479,7 +384,6 @@ static NSString* RNSharedElementNodeHierarchySummary(UIView* view)
 
 - (void)onDisplayLinkUpdate:(CADisplayLink *)sender
 {
-  // NSLog(@"onDisplayLinkUpdate");
   if (_styleRequests != nil) [self updateStyle];
   if (_contentRequests != nil) [self updateContent];
 }

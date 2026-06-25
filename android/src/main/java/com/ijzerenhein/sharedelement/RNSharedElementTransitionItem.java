@@ -1,14 +1,11 @@
 package com.ijzerenhein.sharedelement;
 
-// import android.util.Log;
 import android.view.View;
 import android.view.ViewParent;
 import android.view.ViewGroup;
 import android.graphics.RectF;
 
 class RNSharedElementTransitionItem {
-  // static private final String LOG_TAG = "RNSharedElementTransitionItem";
-
   private final RNSharedElementNodeManager mNodeManager;
   private final String mName;
   private RNSharedElementNode mNode;
