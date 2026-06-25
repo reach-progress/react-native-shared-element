@@ -1109,6 +1109,9 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
              interpolatedClipInsets.right);
   }
   
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+
   // Update frame
   CGRect parentBounds = self.superview.bounds;
   [super reactSetFrame:parentBounds];
@@ -1266,6 +1269,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
       contentView2.layer.opacity = MIN(MAX(_nodePosition, 0.0f), 1.0f);
     }
   }
+  [CATransaction commit];
 
   if (shouldLogGeometry) {
     DebugLog(@"[RNSE:%ld %@] draw pos=%.3f bucket=%ld outerFrame=%@ innerFrame=%@ maskFrame=%@ content1Frame=%@ content1Alpha=%.3f content1Class=%@ content2Frame=%@ content2Alpha=%.3f content2Class=%@ primaryImageSize=%@ secondaryImageSize=%@ animation=%ld resize=%ld align=%ld",
