@@ -26,6 +26,8 @@
 @property (nonatomic, assign) CGFloat nativeDelay;
 @property (nonatomic, assign) CGFloat nativeFrom;
 @property (nonatomic, assign) CGFloat nativeTo;
+@property (nonatomic, copy) NSString* nativeGroup;
+@property (nonatomic, assign) NSInteger nativeGroupSize;
 @property (nonatomic, copy) NSString* debugName;
 @property (nonatomic, strong) RNSharedElementNode* startNode;
 @property (nonatomic, strong) RNSharedElementNode* startAncestor;

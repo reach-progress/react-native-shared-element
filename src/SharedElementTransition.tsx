@@ -79,6 +79,10 @@ export type SharedElementTransitionProps = {
   nativeFrom?: number;
   /** Optional native end progress value (defaults to 1.0). */
   nativeTo?: number;
+  /** Native group id for synchronizing CADisplayLink start time. */
+  nativeGroup?: string;
+  /** Number of transitions expected in the native group. */
+  nativeGroupSize?: number;
   /** Enable debug overlays and boundary visuals. */
   debug?: boolean;
   /** Additional style applied to the transition view. */

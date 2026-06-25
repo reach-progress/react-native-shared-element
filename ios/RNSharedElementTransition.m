@@ -82,6 +82,48 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   return 1.0f - (inv * inv * inv);
 }
 
+@class RNSharedElementTransition;
+
+@interface RNSharedElementNativeAnimationGroup : NSObject
+@property (nonatomic, copy) NSString* groupId;
+@property (nonatomic, assign) NSInteger expectedCount;
+@property (nonatomic, strong) NSHashTable<RNSharedElementTransition*>* transitions;
+@property (nonatomic, assign) BOOL started;
+@property (nonatomic, assign) BOOL timeoutScheduled;
+@property (nonatomic, assign) CFTimeInterval startTime;
+@end
+
+@implementation RNSharedElementNativeAnimationGroup
+
+- (instancetype)initWithGroupId:(NSString*)groupId expectedCount:(NSInteger)expectedCount
+{
+  if ((self = [super init])) {
+    _groupId = [groupId copy];
+    _expectedCount = expectedCount;
+    _transitions = [NSHashTable weakObjectsHashTable];
+    _started = NO;
+    _timeoutScheduled = NO;
+    _startTime = 0;
+  }
+  return self;
+}
+
+@end
+
+static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNSharedElementNativeAnimationGroups;
+
+static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNSharedElementGetNativeAnimationGroups(void)
+{
+  if (RNSharedElementNativeAnimationGroups == nil) {
+    RNSharedElementNativeAnimationGroups = [NSMutableDictionary new];
+  }
+  return RNSharedElementNativeAnimationGroups;
+}
+
+@interface RNSharedElementTransition ()
+- (void)beginNativeAnimationAtTime:(CFTimeInterval)startTime reason:(NSString*)reason;
+@end
+
 @implementation RNSharedElementTransition
 {
   NSArray* _items;
@@ -102,12 +144,104 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   CGFloat _nativeDelay;
   BOOL _nativeAnimating;
   BOOL _nativeAnimationPending;
+  BOOL _nativeAnimationStartScheduled;
+  NSString* _nativeRegisteredGroup;
   NSInteger _debugId;
   NSInteger _debugLastGeometryBucket;
   NSInteger _debugGeometryLogCount;
 }
 
-- (void)startNativeAnimationIfReady:(NSString*)reason
+- (void)removeFromNativeAnimationGroup
+{
+  if (_nativeRegisteredGroup == nil) return;
+  NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* groups = RNSharedElementGetNativeAnimationGroups();
+  RNSharedElementNativeAnimationGroup* group = [groups objectForKey:_nativeRegisteredGroup];
+  [group.transitions removeObject:self];
+  if (group != nil && group.transitions.allObjects.count == 0) {
+    [groups removeObjectForKey:_nativeRegisteredGroup];
+  }
+  _nativeRegisteredGroup = nil;
+}
+
++ (void)startNativeAnimationGroup:(RNSharedElementNativeAnimationGroup*)group reason:(NSString*)reason
+{
+  if (group == nil || group.started) return;
+
+  group.started = YES;
+  CFTimeInterval maxDelaySeconds = 0;
+  NSArray<RNSharedElementTransition*>* transitions = group.transitions.allObjects;
+  for (RNSharedElementTransition* transition in transitions) {
+    maxDelaySeconds = MAX(maxDelaySeconds, transition->_nativeDelay / 1000.0);
+  }
+  group.startTime = CACurrentMediaTime() + maxDelaySeconds;
+
+  DebugLog(@"[RNSE:group %@] native anim group start reason=%@ count=%lu expected=%ld startTime=%.6f delay=%.3f",
+           group.groupId,
+           reason,
+           (unsigned long)transitions.count,
+           (long)group.expectedCount,
+           group.startTime,
+           maxDelaySeconds * 1000.0);
+
+  for (RNSharedElementTransition* transition in transitions) {
+    [transition beginNativeAnimationAtTime:group.startTime reason:reason];
+  }
+}
+
+- (BOOL)queueNativeAnimationInGroup:(NSString*)reason
+{
+  if (_nativeGroup.length == 0 || _nativeGroupSize <= 1) {
+    return NO;
+  }
+
+  NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* groups = RNSharedElementGetNativeAnimationGroups();
+  RNSharedElementNativeAnimationGroup* group = [groups objectForKey:_nativeGroup];
+  if (group == nil) {
+    group = [[RNSharedElementNativeAnimationGroup alloc] initWithGroupId:_nativeGroup expectedCount:_nativeGroupSize];
+    [groups setObject:group forKey:_nativeGroup];
+  } else {
+    group.expectedCount = MAX(group.expectedCount, _nativeGroupSize);
+  }
+
+  if (group.started) {
+    [self beginNativeAnimationAtTime:group.startTime reason:[NSString stringWithFormat:@"group:%@", reason]];
+    return YES;
+  }
+
+  if (![_nativeRegisteredGroup isEqualToString:_nativeGroup]) {
+    [self removeFromNativeAnimationGroup];
+    [group.transitions addObject:self];
+    _nativeRegisteredGroup = [_nativeGroup copy];
+  }
+
+  const NSUInteger readyCount = group.transitions.allObjects.count;
+  DebugLog(@"[RNSE:%ld %@] native anim group wait reason=%@ group=%@ ready=%lu expected=%ld",
+           (long)_debugId,
+           RNSharedElementTransitionName(_debugName),
+           reason,
+           _nativeGroup,
+           (unsigned long)readyCount,
+           (long)group.expectedCount);
+
+  if (readyCount >= group.expectedCount) {
+    [RNSharedElementTransition startNativeAnimationGroup:group reason:[NSString stringWithFormat:@"group-ready:%@", reason]];
+    return YES;
+  }
+
+  if (!group.timeoutScheduled) {
+    group.timeoutScheduled = YES;
+    __weak RNSharedElementNativeAnimationGroup* weakGroup = group;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(80 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+      RNSharedElementNativeAnimationGroup* timeoutGroup = weakGroup;
+      if (timeoutGroup == nil || timeoutGroup.started) return;
+      [RNSharedElementTransition startNativeAnimationGroup:timeoutGroup reason:@"group-timeout"];
+    });
+  }
+
+  return YES;
+}
+
+- (void)startNativeAnimationNowIfReady:(NSString*)reason
 {
   // Drive nodePosition natively once layout/content is ready.
   if (!_nativeDriver) return;
@@ -124,25 +258,49 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   }
   if (_nativeAnimating) return;
 
-  _nativeAnimating = YES;
-  _nativeAnimationPending = NO;
+  if ([self queueNativeAnimationInGroup:reason]) {
+    return;
+  }
 
   const CFTimeInterval now = CACurrentMediaTime();
   const CFTimeInterval delaySeconds = _nativeDelay / 1000.0;
   // Delay is in ms from JS, convert to seconds for CoreAnimation clock.
-  _nativeStartTime = now + delaySeconds;
+  [self beginNativeAnimationAtTime:(now + delaySeconds) reason:reason];
+}
+
+- (void)startNativeAnimationIfReady:(NSString*)reason
+{
+  if (_nativeAnimationStartScheduled || _nativeAnimating) return;
+  _nativeAnimationStartScheduled = YES;
+  NSString* scheduledReason = [reason copy];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    self->_nativeAnimationStartScheduled = NO;
+    [self startNativeAnimationNowIfReady:scheduledReason];
+  });
+}
+
+- (void)beginNativeAnimationAtTime:(CFTimeInterval)startTime reason:(NSString*)reason
+{
+  if (!_nativeDriver) return;
+  if (_nativeAnimating) return;
+
+  _nativeAnimating = YES;
+  _nativeAnimationPending = NO;
+  _nativeStartTime = startTime;
 
   if (!isfinite(_nativeFrom)) _nativeFrom = _nodePosition;
   if (!isfinite(_nativeTo)) _nativeTo = 1.0f;
 
-  DebugLog(@"[RNSE:%ld %@] native anim start reason=%@ from=%.3f to=%.3f duration=%.1f delay=%.1f initialVisibleAncestor=%d",
+  DebugLog(@"[RNSE:%ld %@] native anim start reason=%@ group=%@ from=%.3f to=%.3f duration=%.1f delay=%.1f startTime=%.6f initialVisibleAncestor=%d",
            (long)_debugId,
            RNSharedElementTransitionName(_debugName),
            reason,
+           _nativeGroup ?: @"<none>",
            _nativeFrom,
            _nativeTo,
            _nativeDuration,
            _nativeDelay,
+           _nativeStartTime,
            _initialVisibleAncestorIndex);
 
   if (_displayLink == nil) {
@@ -252,6 +410,9 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
     _nativeTo = NAN;
     _nativeAnimating = NO;
     _nativeAnimationPending = NO;
+    _nativeAnimationStartScheduled = NO;
+    _nativeRegisteredGroup = nil;
+    _nativeGroupSize = 0;
     self.userInteractionEnabled = NO;
     
     _outerStyleView = [[UIImageView alloc]init];
@@ -281,6 +442,7 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
   [super removeFromSuperview];
   // Ensure display link stops if the transition view is removed.
   [self stopNativeAnimation:@"removeFromSuperview"];
+  [self removeFromNativeAnimationGroup];
   
   for (RNSharedElementTransitionItem* item in _items) {
     if (item.node != nil) [item.node cancelRequests:self];
@@ -298,6 +460,7 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 {
   // Defensive cleanup to avoid display link retaining this view.
   [self stopNativeAnimation:@"dealloc"];
+  [self removeFromNativeAnimationGroup];
   for (RNSharedElementTransitionItem* item in _items) {
     item.node = nil;
   }
@@ -457,6 +620,26 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
     // From/to changes should restart the pending native animation.
     _nativeAnimationPending = _nativeDriver;
     [self startNativeAnimationIfReady:@"nativeTo"];
+  }
+}
+
+- (void)setNativeGroup:(NSString*)nativeGroup
+{
+  if ((_nativeGroup == nativeGroup) || [_nativeGroup isEqualToString:nativeGroup]) {
+    return;
+  }
+  [self removeFromNativeAnimationGroup];
+  _nativeGroup = [nativeGroup copy];
+  _nativeAnimationPending = _nativeDriver;
+  [self startNativeAnimationIfReady:@"nativeGroup"];
+}
+
+- (void)setNativeGroupSize:(NSInteger)nativeGroupSize
+{
+  if (_nativeGroupSize != nativeGroupSize) {
+    _nativeGroupSize = nativeGroupSize;
+    _nativeAnimationPending = _nativeDriver;
+    [self startNativeAnimationIfReady:@"nativeGroupSize"];
   }
 }
 

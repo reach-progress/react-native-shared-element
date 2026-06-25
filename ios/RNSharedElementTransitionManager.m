@@ -282,6 +282,18 @@ RCT_CUSTOM_VIEW_PROPERTY(nativeTo, CGFloat, RNSharedElementTransition)
   view.nativeTo = value;
   DebugLog(@"RNSharedElementTransitionManager: set nativeTo=%f", value);
 }
+RCT_CUSTOM_VIEW_PROPERTY(nativeGroup, NSString, RNSharedElementTransition)
+{
+  NSString* value = [RCTConvert NSString:json];
+  view.nativeGroup = value;
+  DebugLog(@"RNSharedElementTransitionManager: set nativeGroup=%@", value);
+}
+RCT_CUSTOM_VIEW_PROPERTY(nativeGroupSize, NSInteger, RNSharedElementTransition)
+{
+  NSInteger value = [RCTConvert NSInteger:json];
+  view.nativeGroupSize = value;
+  DebugLog(@"RNSharedElementTransitionManager: set nativeGroupSize=%ld", (long)value);
+}
 RCT_CUSTOM_VIEW_PROPERTY(startNode, NSObject, RNSharedElementTransition)
 {
   NSDictionary* nodeJson = [json valueForKey:@"node"];

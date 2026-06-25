@@ -108,6 +108,17 @@ public class RNSharedElementTransitionManager extends SimpleViewManager<RNShared
     view.setNativeTo(nativeTo);
   }
 
+  @ReactProp(name = "nativeGroup")
+  public void setNativeGroup(final RNSharedElementTransition view, final String nativeGroup) {
+    // iOS uses this to synchronize multiple shared elements. Android keeps
+    // its existing per-view native driver for now, but accepts the prop.
+  }
+
+  @ReactProp(name = "nativeGroupSize")
+  public void setNativeGroupSize(final RNSharedElementTransition view, final int nativeGroupSize) {
+    // See setNativeGroup.
+  }
+
   private void setViewItem(final RNSharedElementTransition view, RNSharedElementTransition.Item item, final ReadableMap map) {
     if (map == null) {
       log("setViewItem " + item + " map=null -> clear node");
