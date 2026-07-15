@@ -70,6 +70,12 @@ public class RNSharedElementTransitionManager extends SimpleViewManager<RNShared
     view.setResize(RNSharedElementResize.values()[resize]);
   }
 
+  @ReactProp(name = "imageResolution")
+  public void setImageResolution(final RNSharedElementTransition view, final int imageResolution) {
+    // Android renders the endpoints in separate views, so there is no shared
+    // backing image to select. Accept the cross-platform prop as a no-op.
+  }
+
   @ReactProp(name = "align")
   public void setAlign(final RNSharedElementTransition view, final int align) {
     view.setAlign(RNSharedElementAlign.values()[align]);

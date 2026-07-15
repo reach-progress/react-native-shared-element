@@ -27,6 +27,11 @@ typedef NS_ENUM(NSInteger, RNSharedElementResize) {
     RNSharedElementResizeNone = 3
 };
 
+typedef NS_ENUM(NSInteger, RNSharedElementImageResolution) {
+    RNSharedElementImageResolutionLarger = 0,
+    RNSharedElementImageResolutionSmaller = 1
+};
+
 typedef NS_ENUM(NSInteger, RNSharedElementAlign) {
     RNSharedElementAlignAuto = 0,
     RNSharedElementAlignLeftTop = 1,

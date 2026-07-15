@@ -21,6 +21,7 @@ type PropsType = {
   nodePosition?: number | any;
   animation: RNSharedElementAnimation;
   resize: RNSharedElementResize;
+  imageResolution?: number;
   align: RNSharedElementAlign;
   //onMeasure?: (event: SharedElementOnMeasureEvent) => void;
 };

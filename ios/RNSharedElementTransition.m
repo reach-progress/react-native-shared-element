@@ -300,6 +300,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     _nodePosition = 0.0f;
     _animation = RNSharedElementAnimationMove;
     _resize = RNSharedElementResizeStretch;
+    _imageResolution = RNSharedElementImageResolutionLarger;
     _align = RNSharedElementAlignCenterCenter;
     _reactFrameSet = NO;
     _initialLayoutPassCompleted = NO;
@@ -450,6 +451,11 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   }
 }
 
+- (void)setImageResolution:(RNSharedElementImageResolution)imageResolution
+{
+  _imageResolution = imageResolution;
+}
+
 - (void) setAlign:(RNSharedElementAlign)align
 {
   if (_align != align) {
@@ -564,6 +570,35 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   view.image = image;
 }
 
+- (unsigned long long)pixelCountForImage:(UIImage*)image
+{
+  CGImageRef cgImage = image.CGImage;
+  if (cgImage != nil) {
+    return (unsigned long long)CGImageGetWidth(cgImage) *
+      (unsigned long long)CGImageGetHeight(cgImage);
+  }
+
+  CGFloat scale = image.scale > 0 ? image.scale : 1;
+  return (unsigned long long)llround(image.size.width * scale) *
+    (unsigned long long)llround(image.size.height * scale);
+}
+
+- (BOOL)shouldReplacePrimaryImageWithImage:(UIImage*)image
+{
+  UIImage* currentImage = _primaryImageView.image;
+  if (currentImage == nil) {
+    return YES;
+  }
+
+  unsigned long long imagePixelCount = [self pixelCountForImage:image];
+  unsigned long long currentPixelCount = [self pixelCountForImage:currentImage];
+  if (_imageResolution == RNSharedElementImageResolutionSmaller) {
+    return imagePixelCount < currentPixelCount;
+  }
+
+  return imagePixelCount > currentPixelCount;
+}
+
 - (void) didLoadContent:(RNSharedElementContent*)content node:(id)node
 {
   RNSharedElementTransitionItem* item = [self findItemForNode:node];
@@ -572,9 +607,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   if ((content.type == RNSharedElementContentTypeSnapshotImage) || (content.type == RNSharedElementContentTypeRawImage)) {
     UIImage* image = (UIImage*) content.data;
     if (_animation == RNSharedElementAnimationMove) {
-      if (_primaryImageView.image == nil) {
-        [self updateViewWithImage:_primaryImageView image:image];
-      } else if ((image.size.width * image.size.height) > (_primaryImageView.image.size.width * _primaryImageView.image.size.height)) {
+      if ([self shouldReplacePrimaryImageWithImage:image]) {
         [self updateViewWithImage:_primaryImageView image:image];
       }
     } else {

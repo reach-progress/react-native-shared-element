@@ -17,6 +17,7 @@
 @property (nonatomic, assign) CGFloat nodePosition;
 @property (nonatomic, assign) RNSharedElementAnimation animation;
 @property (nonatomic, assign) RNSharedElementResize resize;
+@property (nonatomic, assign) RNSharedElementImageResolution imageResolution;
 @property (nonatomic, assign) RNSharedElementAlign align;
 
 // Fabric interop path: drive nodePosition natively via CADisplayLink.

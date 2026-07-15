@@ -14,6 +14,7 @@ import {
   SharedElementNode,
   SharedElementAnimation,
   SharedElementResize,
+  SharedElementImageResolution,
   SharedElementAlign,
   SharedElementNodeType,
   SharedElementContentType,
@@ -64,6 +65,11 @@ export type SharedElementTransitionProps = {
   animation: SharedElementAnimation;
   /** Resize behavior for the shared element content. */
   resize?: SharedElementResize;
+  /**
+   * Select which endpoint image backs a move transition. Using the smaller
+   * image reduces texture work at the cost of some softness while scaling up.
+   */
+  imageResolution?: SharedElementImageResolution;
   /** Alignment behavior for the shared element content. */
   align?: SharedElementAlign;
   /**
@@ -106,6 +112,13 @@ const NativeResizeType = new Map<SharedElementResize, number>([
   ["clip", 2],
   ["none", 3],
 ]);
+
+const NativeImageResolutionType = new Map<SharedElementImageResolution, number>(
+  [
+    ["larger", 0],
+    ["smaller", 1],
+  ]
+);
 
 const NativeAlignType = new Map<SharedElementAlign, number>([
   ["auto", 0],
@@ -215,6 +228,7 @@ export class SharedElementTransition extends React.Component<
     SharedElementComponent: RNAnimatedSharedElementTransitionView,
     animation: "move",
     resize: "auto",
+    imageResolution: "larger",
     align: "auto",
   };
 
@@ -351,6 +365,7 @@ export class SharedElementTransition extends React.Component<
       end,
       animation,
       resize,
+      imageResolution = "larger",
       align,
       nativeDriver,
       nativeDuration,
@@ -380,6 +395,7 @@ export class SharedElementTransition extends React.Component<
           animation={NativeAnimationType.get(animation)}
           // @ts-ignore
           resize={NativeResizeType.get(resize)}
+          imageResolution={NativeImageResolutionType.get(imageResolution)}
           // @ts-ignore
           align={NativeAlignType.get(align)}
           nativeDriver={nativeDriver ?? true}

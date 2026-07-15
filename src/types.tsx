@@ -9,6 +9,8 @@ export type SharedElementAnimation = "move" | "fade" | "fade-in" | "fade-out";
 
 export type SharedElementResize = "auto" | "stretch" | "clip" | "none";
 
+export type SharedElementImageResolution = "larger" | "smaller";
+
 export type SharedElementAlign =
   | "auto"
   | "left-top"
