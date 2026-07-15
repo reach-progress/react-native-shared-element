@@ -196,7 +196,7 @@ The `<SharedElementTransition>` component executes a shared element transition n
 | `position`  | `number` \| `Animated.Value` \| `Reanimated.Value`         | Interpolated position (0..1), between the start- and end nodes                                             |
 | `animation` | [SharedElementAnimation](#SharedElementAnimation)          | Type of animation, e.g move start element or cross-fade between start- and end elements (default = `move`) |
 | `resize`    | [SharedElementResize](#SharedElementResize)                | Resize behavior (default = `auto`)                                                                         |
-| `imageResolution` | `larger` \| `smaller`                                | Endpoint image used for move transitions (default = `larger`; `smaller` reduces texture cost on iOS)       |
+| `imageResolution` | `larger` \| `smaller` \| `layout`                     | Image used for move transitions (`layout` prepares a capped texture from measured endpoint layouts on iOS) |
 | `align`     | [SharedElementAlign](#SharedElementAlign)                  | Alignment behavior (default = `auto`)                                                                      |
 | `debug`     | `boolean`                                                  | Renders debug overlays for diagnosing measuring and animations                                             |
 | `onMeasure` | `function`                                                 | Event handler that is called when nodes have been measured and snapshotted                                 |

@@ -212,7 +212,7 @@ NSArray* _imageResolvers;
   _refCount = refCount;
   if (_refCount == 0) {
     if (_displayLink != nil) {
-      [_displayLink removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
+      [_displayLink removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
       _displayLink = nil;
     }
     [self updateResolvedSource:NO];
@@ -262,13 +262,13 @@ NSArray* _imageResolvers;
   RNSharedElementNodeResolvedSource* resolvedSource = _resolvedSource;
   UIView* view = resolvedSource.view;
   UIView* contentView = resolvedSource.contentView;
-  if (view == nil) return;
   if (_contentRequests == nil) return;
+  if (view == nil) return [self updateRetryLoop];
   
   CGRect bounds = view.bounds;
   CGRect frame = contentView.frame;
   if (!bounds.size.width || !bounds.size.height) {
-    return;
+    return [self updateRetryLoop];
   }
   
   // Obtain snapshot content
@@ -331,7 +331,7 @@ NSArray* _imageResolvers;
   UIView* view = resolvedSource.view;
   UIView* contentView = resolvedSource.contentView;
   if (_styleRequests == nil) return;
-  if (view == nil) return;
+  if (view == nil) return [self updateRetryLoop];
   
   // If the window could not be obtained, then try again later
   if (view.window == nil) {
@@ -340,7 +340,7 @@ NSArray* _imageResolvers;
   
   // Get absolute layout
   CGRect layout = [view convertRect:view.bounds toView:nil];
-  if (CGRectIsEmpty(layout)) return;
+  if (CGRectIsEmpty(layout)) return [self updateRetryLoop];
   
   // Create style
   RNSharedElementStyle* style = [[RNSharedElementStyle alloc]initWithView:view];
@@ -375,9 +375,9 @@ NSArray* _imageResolvers;
   BOOL shouldRun = _styleRequests != nil || _contentRequests != nil;
   if (shouldRun && _displayLink == nil) {
     _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(onDisplayLinkUpdate:)];
-    [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
+    [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
   } else if (!shouldRun && _displayLink != nil) {
-    [_displayLink removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
+    [_displayLink removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
     _displayLink = nil;
   }
 }

@@ -18,6 +18,48 @@
 #define ITEM_START 2
 #define ITEM_END 3
 
+// Keep the transition texture near 6 MB at 4 bytes per pixel. The endpoint
+// images remain mounted and provide full-resolution content after the move.
+static const CGFloat RNSharedElementLayoutImageMaxPixelCount = 1500000.0f;
+// Prefer a ready endpoint image over delaying navigation for slow preparation.
+static const NSTimeInterval RNSharedElementLayoutImageTimeout = 0.08;
+static const NSInteger RNSharedElementLayoutValidationMaxAttempts = 3;
+
+static dispatch_queue_t RNSharedElementImagePreparationQueue(void)
+{
+  static dispatch_queue_t queue;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    queue = dispatch_queue_create(
+      "com.ijzerenhein.react-native-shared-element.image-preparation",
+      DISPATCH_QUEUE_SERIAL
+    );
+  });
+  return queue;
+}
+
+static BOOL RNSharedElementRectsNearlyEqual(CGRect first, CGRect second)
+{
+  const CGFloat tolerance = 0.5f;
+  return fabs(first.origin.x - second.origin.x) <= tolerance &&
+    fabs(first.origin.y - second.origin.y) <= tolerance &&
+    fabs(first.size.width - second.size.width) <= tolerance &&
+    fabs(first.size.height - second.size.height) <= tolerance;
+}
+
+static UIImage* RNSharedElementResizeImage(UIImage* image, CGSize pixelSize)
+{
+  if (image == nil || pixelSize.width <= 0 || pixelSize.height <= 0) {
+    return nil;
+  }
+
+  UIGraphicsBeginImageContextWithOptions(pixelSize, NO, 1.0f);
+  [image drawInRect:CGRectMake(0, 0, pixelSize.width, pixelSize.height)];
+  UIImage* resizedImage = UIGraphicsGetImageFromCurrentImageContext();
+  UIGraphicsEndImageContext();
+  return resizedImage;
+}
+
 // Native CADisplayLink animation used for Fabric interop when JS-driven
 // Animated values do not update JS-side state. Fixed duration; eased to
 // feel closer to UIKit transitions.
@@ -71,6 +113,11 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 
 @interface RNSharedElementTransition ()
 - (void)beginNativeAnimationAtTime:(CFTimeInterval)startTime;
+- (void)updateViewWithImage:(UIImageView*)view image:(UIImage*)image;
+- (unsigned long long)pixelCountForImage:(UIImage*)image;
+- (void)startNativeAnimationIfReady;
+- (void)updateNodeVisibility;
+- (void)updateStyle;
 @end
 
 @implementation RNSharedElementTransition
@@ -95,6 +142,252 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   BOOL _nativeAnimationPending;
   BOOL _nativeAnimationStartScheduled;
   NSString* _nativeRegisteredGroup;
+  CADisplayLink* _layoutValidationDisplayLink;
+  BOOL _layoutImagePreparing;
+  BOOL _layoutImageReady;
+  NSUInteger _layoutImageGeneration;
+  NSInteger _layoutValidationAttempts;
+}
+
+- (UIImage*)imageForContent:(RNSharedElementContent*)content
+{
+  if (content == nil || ![content.data isKindOfClass:[UIImage class]]) {
+    return nil;
+  }
+  if (content.type != RNSharedElementContentTypeRawImage &&
+      content.type != RNSharedElementContentTypeSnapshotImage) {
+    return nil;
+  }
+  return (UIImage*)content.data;
+}
+
+- (BOOL)isTransitionDataReady
+{
+  if (!_initialLayoutPassCompleted) return NO;
+  for (RNSharedElementTransitionItem* item in _items) {
+    if (item.node == nil) continue;
+    if (item.style == nil) return NO;
+    if (!item.isAncestor && item.content == nil) return NO;
+  }
+  return YES;
+}
+
+- (BOOL)requiresLayoutImagePreparation
+{
+  if (_imageResolution != RNSharedElementImageResolutionLayout) return NO;
+  if (_animation != RNSharedElementAnimationMove) return NO;
+  RNSharedElementTransitionItem* startItem = _items[ITEM_START];
+  RNSharedElementTransitionItem* endItem = _items[ITEM_END];
+  return [self imageForContent:startItem.content] != nil &&
+    [self imageForContent:endItem.content] != nil;
+}
+
+- (BOOL)isTransitionReady
+{
+  if (![self isTransitionDataReady]) return NO;
+  if ([self requiresLayoutImagePreparation]) return _layoutImageReady;
+  return YES;
+}
+
+- (void)invalidateLayoutImagePreparation
+{
+  _layoutImageGeneration++;
+  _layoutImagePreparing = NO;
+  _layoutImageReady = NO;
+  _layoutValidationAttempts = 0;
+  if (_layoutValidationDisplayLink != nil) {
+    [_layoutValidationDisplayLink invalidate];
+    _layoutValidationDisplayLink = nil;
+  }
+}
+
+- (CGRect)currentLayoutForItem:(RNSharedElementTransitionItem*)item
+{
+  UIView* view = item.style.view;
+  if (view == nil || view.window == nil || CGRectIsEmpty(view.bounds)) {
+    return CGRectNull;
+  }
+  CGRect layout = [view convertRect:view.bounds toView:nil];
+  return CGRectIsEmpty(layout) ? CGRectNull : layout;
+}
+
+- (void)scheduleLayoutValidationIfNeeded
+{
+  if (_layoutValidationDisplayLink != nil || _layoutImagePreparing || _layoutImageReady) return;
+  _layoutValidationDisplayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(onLayoutValidationDisplayLink:)];
+  [_layoutValidationDisplayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+}
+
+- (void)completeLayoutImagePreparationWithImage:(UIImage*)image generation:(NSUInteger)generation
+{
+  if (generation != _layoutImageGeneration) return;
+  if (_imageResolution != RNSharedElementImageResolutionLayout) return;
+  _layoutImagePreparing = NO;
+  _layoutImageReady = image != nil;
+  if (image != nil) {
+    [self updateViewWithImage:_primaryImageView image:image];
+  }
+  [self updateStyle];
+  [self updateNodeVisibility];
+  [self startNativeAnimationIfReady];
+}
+
+- (void)useLayoutImageFallback
+{
+  RNSharedElementTransitionItem* startItem = _items[ITEM_START];
+  RNSharedElementTransitionItem* endItem = _items[ITEM_END];
+  UIImage* startImage = [self imageForContent:startItem.content];
+  UIImage* endImage = [self imageForContent:endItem.content];
+  UIImage* fallbackImage = startImage;
+  if (fallbackImage == nil ||
+      (endImage != nil && [self pixelCountForImage:endImage] < [self pixelCountForImage:fallbackImage])) {
+    fallbackImage = endImage;
+  }
+
+  _layoutImageGeneration++;
+  _layoutImagePreparing = NO;
+  _layoutImageReady = fallbackImage != nil;
+  if (fallbackImage != nil) {
+    [self updateViewWithImage:_primaryImageView image:fallbackImage];
+  }
+  [self updateStyle];
+  [self updateNodeVisibility];
+  [self startNativeAnimationIfReady];
+}
+
+- (void)prepareLayoutImage
+{
+  if (_layoutImagePreparing || _layoutImageReady) return;
+
+  RNSharedElementTransitionItem* startItem = _items[ITEM_START];
+  RNSharedElementTransitionItem* endItem = _items[ITEM_END];
+  UIImage* startImage = [self imageForContent:startItem.content];
+  UIImage* endImage = [self imageForContent:endItem.content];
+  if (startImage == nil || endImage == nil) {
+    [self useLayoutImageFallback];
+    return;
+  }
+
+  UIImage* sourceImage = [self pixelCountForImage:startImage] >= [self pixelCountForImage:endImage]
+    ? startImage
+    : endImage;
+  CGRect startContentLayout = [startItem contentLayoutForContent:startItem.content];
+  CGRect endContentLayout = [endItem contentLayoutForContent:endItem.content];
+  CGFloat requiredLongEdgePoints = MAX(
+    MAX(fabs(startContentLayout.size.width), fabs(startContentLayout.size.height)),
+    MAX(fabs(endContentLayout.size.width), fabs(endContentLayout.size.height))
+  );
+  CGFloat screenScale = self.window.screen.scale;
+  if (screenScale <= 0) screenScale = UIScreen.mainScreen.scale;
+
+  CGFloat sourcePixelWidth = sourceImage.size.width * sourceImage.scale;
+  CGFloat sourcePixelHeight = sourceImage.size.height * sourceImage.scale;
+  CGFloat sourceLongEdge = MAX(sourcePixelWidth, sourcePixelHeight);
+  CGFloat targetLongEdge = MIN(ceil(requiredLongEdgePoints * screenScale), sourceLongEdge);
+  if (targetLongEdge <= 0 || sourceLongEdge <= 0) {
+    [self useLayoutImageFallback];
+    return;
+  }
+
+  CGFloat resizeScale = targetLongEdge / sourceLongEdge;
+  CGSize targetPixelSize = CGSizeMake(
+    MAX(1, round(sourcePixelWidth * resizeScale)),
+    MAX(1, round(sourcePixelHeight * resizeScale))
+  );
+  CGFloat targetPixelCount = targetPixelSize.width * targetPixelSize.height;
+  if (targetPixelCount > RNSharedElementLayoutImageMaxPixelCount) {
+    CGFloat pixelBudgetScale = sqrt(RNSharedElementLayoutImageMaxPixelCount / targetPixelCount);
+    targetPixelSize.width = MAX(1, round(targetPixelSize.width * pixelBudgetScale));
+    targetPixelSize.height = MAX(1, round(targetPixelSize.height * pixelBudgetScale));
+  }
+
+  if (targetPixelSize.width >= sourcePixelWidth && targetPixelSize.height >= sourcePixelHeight) {
+    _layoutImageReady = YES;
+    [self updateViewWithImage:_primaryImageView image:sourceImage];
+    [self updateNodeVisibility];
+    [self startNativeAnimationIfReady];
+    return;
+  }
+
+  _layoutImagePreparing = YES;
+  NSUInteger generation = ++_layoutImageGeneration;
+  __weak RNSharedElementTransition* weakSelf = self;
+  dispatch_async(RNSharedElementImagePreparationQueue(), ^{
+    @autoreleasepool {
+      UIImage* resizedImage = RNSharedElementResizeImage(sourceImage, targetPixelSize);
+      dispatch_async(dispatch_get_main_queue(), ^{
+        RNSharedElementTransition* strongSelf = weakSelf;
+        if (strongSelf == nil) return;
+        if (resizedImage == nil) {
+          if (generation == strongSelf->_layoutImageGeneration) {
+            [strongSelf useLayoutImageFallback];
+          }
+          return;
+        }
+        [strongSelf completeLayoutImagePreparationWithImage:resizedImage generation:generation];
+      });
+    }
+  });
+
+  dispatch_after(
+    dispatch_time(DISPATCH_TIME_NOW, (int64_t)(RNSharedElementLayoutImageTimeout * NSEC_PER_SEC)),
+    dispatch_get_main_queue(),
+    ^{
+      RNSharedElementTransition* strongSelf = weakSelf;
+      if (strongSelf == nil) return;
+      if (generation == strongSelf->_layoutImageGeneration && strongSelf->_layoutImagePreparing) {
+        [strongSelf useLayoutImageFallback];
+      }
+    }
+  );
+}
+
+- (void)onLayoutValidationDisplayLink:(CADisplayLink*)displayLink
+{
+  [displayLink invalidate];
+  _layoutValidationDisplayLink = nil;
+  if (![self isTransitionDataReady] || ![self requiresLayoutImagePreparation]) return;
+
+  RNSharedElementTransitionItem* startItem = _items[ITEM_START];
+  RNSharedElementTransitionItem* endItem = _items[ITEM_END];
+  CGRect currentStartLayout = [self currentLayoutForItem:startItem];
+  CGRect currentEndLayout = [self currentLayoutForItem:endItem];
+  _layoutValidationAttempts++;
+
+  if (CGRectIsNull(currentStartLayout) || CGRectIsNull(currentEndLayout)) {
+    if (_layoutValidationAttempts < RNSharedElementLayoutValidationMaxAttempts) {
+      [self scheduleLayoutValidationIfNeeded];
+    } else {
+      [self useLayoutImageFallback];
+    }
+    return;
+  }
+
+  BOOL layoutsAreStable = RNSharedElementRectsNearlyEqual(startItem.style.layout, currentStartLayout) &&
+    RNSharedElementRectsNearlyEqual(endItem.style.layout, currentEndLayout);
+  startItem.style.layout = currentStartLayout;
+  endItem.style.layout = currentEndLayout;
+  startItem.style.size = startItem.style.view.bounds.size;
+  endItem.style.size = endItem.style.view.bounds.size;
+  startItem.style.transform = [RNSharedElementStyle getAbsoluteViewTransform:startItem.style.view];
+  endItem.style.transform = [RNSharedElementStyle getAbsoluteViewTransform:endItem.style.view];
+  if (!layoutsAreStable && _layoutValidationAttempts < RNSharedElementLayoutValidationMaxAttempts) {
+    [self updateStyle];
+    [self scheduleLayoutValidationIfNeeded];
+    return;
+  }
+
+  [self prepareLayoutImage];
+}
+
+- (void)prepareLayoutImageIfNeeded
+{
+  if (![self isTransitionDataReady]) return;
+  if (![self requiresLayoutImagePreparation]) {
+    _layoutImageReady = YES;
+    return;
+  }
+  [self scheduleLayoutValidationIfNeeded];
 }
 
 - (void)removeFromNativeAnimationGroup
@@ -176,7 +469,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   // Drive nodePosition natively once layout/content is ready.
   if (!_nativeDriver) return;
   if (!_nativeAnimationPending) return;
-  if (!_initialLayoutPassCompleted) return;
+  if (![self isTransitionReady]) return;
   // A zero duration is treated as no-op to avoid a zero-length loop.
   if (_nativeDuration <= 0) {
     _nativeAnimationPending = NO;
@@ -282,6 +575,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
       }
     }
     self->_initialLayoutPassCompleted = YES;
+    [self prepareLayoutImageIfNeeded];
     [self updateStyle];
     [self updateNodeVisibility];
     [self startNativeAnimationIfReady];
@@ -315,10 +609,16 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     _nativeAnimationStartScheduled = NO;
     _nativeRegisteredGroup = nil;
     _nativeGroupSize = 0;
+    _layoutValidationDisplayLink = nil;
+    _layoutImagePreparing = NO;
+    _layoutImageReady = NO;
+    _layoutImageGeneration = 0;
+    _layoutValidationAttempts = 0;
     self.userInteractionEnabled = NO;
     
     _outerStyleView = [[UIImageView alloc]init];
     _outerStyleView.userInteractionEnabled = NO;
+    _outerStyleView.hidden = YES;
     _outerStyleView.frame = self.bounds;
     [self addSubview:_outerStyleView];
     
@@ -345,6 +645,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   // Ensure display link stops if the transition view is removed.
   [self stopNativeAnimation];
   [self removeFromNativeAnimationGroup];
+  [self invalidateLayoutImagePreparation];
   
   for (RNSharedElementTransitionItem* item in _items) {
     if (item.node != nil) [item.node cancelRequests:self];
@@ -363,6 +664,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   // Defensive cleanup to avoid display link retaining this view.
   [self stopNativeAnimation];
   [self removeFromNativeAnimationGroup];
+  [self invalidateLayoutImagePreparation];
   for (RNSharedElementTransitionItem* item in _items) {
     item.node = nil;
   }
@@ -389,33 +691,45 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 
 - (void)setStartNode:(RNSharedElementNode *)startNode
 {
-  ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_START]).node = startNode;
+  RNSharedElementTransitionItem* item = _items[ITEM_START];
+  if (item.node != startNode) [self invalidateLayoutImagePreparation];
+  item.node = startNode;
   // Native animation can only start once both nodes/ancestors resolve.
   _nativeAnimationPending = _nativeDriver;
+  [self prepareLayoutImageIfNeeded];
   [self startNativeAnimationIfReady];
 }
 
 - (void)setEndNode:(RNSharedElementNode *)endNode
 {
-  ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_END]).node = endNode;
+  RNSharedElementTransitionItem* item = _items[ITEM_END];
+  if (item.node != endNode) [self invalidateLayoutImagePreparation];
+  item.node = endNode;
   // Native animation can only start once both nodes/ancestors resolve.
   _nativeAnimationPending = _nativeDriver;
+  [self prepareLayoutImageIfNeeded];
   [self startNativeAnimationIfReady];
 }
 
 - (void)setStartAncestor:(RNSharedElementNode *)startNodeAncestor
 {
-  ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_START_ANCESTOR]).node = startNodeAncestor;
+  RNSharedElementTransitionItem* item = _items[ITEM_START_ANCESTOR];
+  if (item.node != startNodeAncestor) [self invalidateLayoutImagePreparation];
+  item.node = startNodeAncestor;
   // Ancestor resolution can happen later than nodes in Fabric interop.
   _nativeAnimationPending = _nativeDriver;
+  [self prepareLayoutImageIfNeeded];
   [self startNativeAnimationIfReady];
 }
 
 - (void)setEndAncestor:(RNSharedElementNode *)endNodeAncestor
 {
-  ((RNSharedElementTransitionItem*)[_items objectAtIndex:ITEM_END_ANCESTOR]).node = endNodeAncestor;
+  RNSharedElementTransitionItem* item = _items[ITEM_END_ANCESTOR];
+  if (item.node != endNodeAncestor) [self invalidateLayoutImagePreparation];
+  item.node = endNodeAncestor;
   // Ancestor resolution can happen later than nodes in Fabric interop.
   _nativeAnimationPending = _nativeDriver;
+  [self prepareLayoutImageIfNeeded];
   [self startNativeAnimationIfReady];
 }
 
@@ -438,8 +752,12 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 - (void) setAnimation:(RNSharedElementAnimation)animation
 {
   if (_animation != animation) {
+    [self invalidateLayoutImagePreparation];
     _animation = animation;
+    [self prepareLayoutImageIfNeeded];
     [self updateStyle];
+    [self updateNodeVisibility];
+    [self startNativeAnimationIfReady];
   }
 }
 
@@ -453,7 +771,12 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 
 - (void)setImageResolution:(RNSharedElementImageResolution)imageResolution
 {
-  _imageResolution = imageResolution;
+  if (_imageResolution != imageResolution) {
+    [self invalidateLayoutImagePreparation];
+    _imageResolution = imageResolution;
+    [self prepareLayoutImageIfNeeded];
+    [self startNativeAnimationIfReady];
+  }
 }
 
 - (void) setAlign:(RNSharedElementAlign)align
@@ -536,8 +859,10 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 
 - (void)updateNodeVisibility
 {
+  BOOL transitionReady = [self isTransitionReady];
+  _outerStyleView.hidden = !transitionReady;
   for (RNSharedElementTransitionItem* item in _items) {
-    BOOL hidden = _initialLayoutPassCompleted && item.style != nil && item.content != nil;
+    BOOL hidden = transitionReady && item.style != nil && item.content != nil;
     if (hidden && (_animation == RNSharedElementAnimationFadeIn) && [item.name isEqualToString:@"startNode"]) hidden = NO;
     if (hidden && (_animation == RNSharedElementAnimationFadeOut) && [item.name isEqualToString:@"endNode"]) hidden = NO;
     item.hidden = hidden;
@@ -551,6 +876,10 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     if (_initialLayoutPassCompleted && item.needsLayout) {
       item.needsLayout = NO;
       [item.node requestStyle:self];
+    }
+    if (_initialLayoutPassCompleted && item.needsContent) {
+      item.needsContent = NO;
+      [item.node requestContent:self];
     }
   }
   [self updateNodeVisibility];
@@ -618,8 +947,10 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
       }
     }
   }
+  [self prepareLayoutImageIfNeeded];
   [self updateStyle];
   [self updateNodeVisibility];
+  [self startNativeAnimationIfReady];
 }
 
 - (void) didLoadStyle:(RNSharedElementStyle *)style node:(RNSharedElementNode*)node
@@ -627,8 +958,10 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   RNSharedElementTransitionItem* item = [self findItemForNode:node];
   if (item == nil) return;
   item.style = style;
+  [self prepareLayoutImageIfNeeded];
   [self updateStyle];
   [self updateNodeVisibility];
+  [self startNativeAnimationIfReady];
 }
 
 - (CGRect)normalizeLayout:(CGRect)layout

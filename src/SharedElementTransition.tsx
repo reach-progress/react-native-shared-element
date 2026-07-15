@@ -66,8 +66,8 @@ export type SharedElementTransitionProps = {
   /** Resize behavior for the shared element content. */
   resize?: SharedElementResize;
   /**
-   * Select which endpoint image backs a move transition. Using the smaller
-   * image reduces texture work at the cost of some softness while scaling up.
+   * Select which image backs a move transition. Layout mode prepares a capped
+   * texture from the measured endpoint layouts on iOS.
    */
   imageResolution?: SharedElementImageResolution;
   /** Alignment behavior for the shared element content. */
@@ -117,6 +117,7 @@ const NativeImageResolutionType = new Map<SharedElementImageResolution, number>(
   [
     ["larger", 0],
     ["smaller", 1],
+    ["layout", 2],
   ]
 );
 

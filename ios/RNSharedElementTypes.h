@@ -29,7 +29,8 @@ typedef NS_ENUM(NSInteger, RNSharedElementResize) {
 
 typedef NS_ENUM(NSInteger, RNSharedElementImageResolution) {
     RNSharedElementImageResolutionLarger = 0,
-    RNSharedElementImageResolutionSmaller = 1
+    RNSharedElementImageResolutionSmaller = 1,
+    RNSharedElementImageResolutionLayout = 2
 };
 
 typedef NS_ENUM(NSInteger, RNSharedElementAlign) {
