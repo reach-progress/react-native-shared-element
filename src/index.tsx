@@ -4,6 +4,7 @@ import {
   SharedElementTransition,
   SharedElementTransitionProps,
 } from "./SharedElementTransition";
+import { SharedElementNode } from "./types";
 
 export * from "./SharedElement";
 export * from "./SharedElementTransition";
@@ -11,9 +12,11 @@ export * from "./types";
 
 type NativeTransitionNode = {
   node?: {
-    nodeHandle: number;
+    nodeHandle?: number;
     isParent: boolean;
     nodeStyle?: Record<string, unknown>;
+    snapshotKey?: string;
+    snapshotMode?: "prefer" | "require";
   };
   ancestor?: {
     nodeHandle: number;
@@ -40,6 +43,16 @@ type RNSharedElementTransitionNativeModule = {
     endItem: NativeTransitionNode,
     timeoutMs: number
   ) => Promise<NativeTransitionReadyResult>;
+  captureSnapshots?: (
+    routeKey: string,
+    elements: { key: string; node: NativeTransitionNode["node"] }[]
+  ) => Promise<{ captured: number; requested: number }>;
+  clearSnapshots?: (routeKey: string) => Promise<boolean>;
+};
+
+export type SharedElementSnapshotCapture = {
+  key: string;
+  node: SharedElementNode;
 };
 
 export type SharedElementTransitionsReadyOptions = {
@@ -67,9 +80,45 @@ function prepareTransitionItem(
   node: SharedElementTransitionProps["start"]
 ): NativeTransitionNode {
   return {
-    node: SharedElementTransition.prepareNode(node?.node || null),
+    node: SharedElementTransition.prepareNode(
+      node?.node || null,
+      node?.snapshot
+    ),
     ancestor: SharedElementTransition.prepareNode(node?.ancestor || null),
   };
+}
+
+export function supportsSharedElementSnapshots(): boolean {
+  const nativeModule = getNativeModule();
+  return (
+    typeof nativeModule?.captureSnapshots === "function" &&
+    typeof nativeModule?.clearSnapshots === "function"
+  );
+}
+
+export async function captureSharedElementSnapshots(
+  routeKey: string,
+  elements: SharedElementSnapshotCapture[]
+): Promise<{ captured: number; requested: number }> {
+  const nativeModule = getNativeModule();
+  if (!nativeModule?.captureSnapshots) {
+    return { captured: 0, requested: elements.length };
+  }
+  return nativeModule.captureSnapshots(
+    routeKey,
+    elements.map(({ key, node }) => ({
+      key,
+      node: SharedElementTransition.prepareNode(node),
+    }))
+  );
+}
+
+export async function clearSharedElementSnapshots(
+  routeKey: string
+): Promise<void> {
+  const nativeModule = getNativeModule();
+  if (!nativeModule?.clearSnapshots) return;
+  await nativeModule.clearSnapshots(routeKey);
 }
 
 export async function waitForSharedElementTransitionsReady(
@@ -138,4 +187,4 @@ export async function waitForSharedElementTransitionsReady(
 }
 
 export const __RNSE_BUILD_ID__ =
-  "rnse-native-only-2026-02-26-ios-close-wait-sync-v2";
+  "rnse-native-only-2026-07-16-visible-endpoint-snapshots-v1";

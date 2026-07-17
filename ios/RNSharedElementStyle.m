@@ -13,6 +13,8 @@
 {
   if ((self = [super init])) {
     _cornerRadii = [RNSharedElementCornerRadii new];
+    _snapshot = NO;
+    _visibleLayout = CGRectNull;
   }
   return self;
 }
@@ -57,6 +59,33 @@
   }
   
   return self;
+}
+
+- (RNSharedElementStyle*)snapshotCopyWithVisibleLayout:(CGRect)visibleLayout
+{
+  RNSharedElementStyle* copy = [[RNSharedElementStyle alloc]init];
+  copy.view = nil;
+  copy.layout = _layout;
+  copy.size = _size;
+  copy.transform = _transform;
+  copy.contentMode = _contentMode;
+  copy.opacity = _opacity;
+  copy.backgroundColor = _backgroundColor;
+  copy.borderWidth = _borderWidth;
+  copy.borderColor = _borderColor;
+  copy.shadowOpacity = _shadowOpacity;
+  copy.shadowRadius = _shadowRadius;
+  copy.shadowOffset = _shadowOffset;
+  copy.shadowColor = _shadowColor;
+  copy.snapshot = YES;
+  copy.visibleLayout = visibleLayout;
+  copy.cornerRadii.layoutDirection = _cornerRadii.layoutDirection;
+  for (RNSharedElementCorner corner = RNSharedElementCornerAll;
+       corner <= RNSharedElementCornerBottomEnd;
+       corner++) {
+    [copy.cornerRadii setRadius:[_cornerRadii radiusForCorner:corner] corner:corner];
+  }
+  return copy;
 }
 
 + (NSString*) stringFromTransform:(CATransform3D) transform {

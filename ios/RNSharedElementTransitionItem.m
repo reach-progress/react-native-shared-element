@@ -37,6 +37,7 @@
     [_nodeManager release:_node];
   }
   _node = node;
+  _visibleLayoutCache = CGRectNull;
   _needsLayout = node != nil;
   _needsContent = !_isAncestor && (node != nil);
   _content = nil;
@@ -64,6 +65,10 @@
 - (CGRect) visibleLayoutForAncestor:(RNSharedElementTransitionItem*) ancestor
 {
   if (!CGRectIsNull(_visibleLayoutCache) || !_style) return _visibleLayoutCache;
+  if (_style.snapshot) {
+    _visibleLayoutCache = _style.visibleLayout;
+    return _visibleLayoutCache;
+  }
   if (!ancestor.style) return _style.layout;
   
   // Get visible area (some parts may be clipped in a scrollview or something)

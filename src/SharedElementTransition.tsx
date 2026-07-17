@@ -46,6 +46,15 @@ export type SharedElementOnMeasureEvent = {
   nativeEvent: SharedElementMeasureData;
 };
 
+export type SharedElementSnapshotMode = "prefer" | "require";
+
+export type SharedElementSnapshotTarget = {
+  /** Stable identity for an endpoint captured before navigation starts. */
+  key: string;
+  /** Prefer can use the live node; require falls back when no snapshot exists. */
+  mode: SharedElementSnapshotMode;
+};
+
 export type SharedElementTransitionProps = {
   /** Start node/ancestor for the shared element transition. */
   start: {
@@ -53,6 +62,8 @@ export type SharedElementTransitionProps = {
     node: SharedElementNode | null;
     /** Ancestor for coordinate normalization and transform compensation. */
     ancestor: SharedElementNode | null;
+    /** Optional immutable endpoint captured while the source scene was visible. */
+    snapshot?: SharedElementSnapshotTarget;
   };
   /** End node/ancestor for the shared element transition. */
   end: {
@@ -60,6 +71,8 @@ export type SharedElementTransitionProps = {
     node: SharedElementNode | null;
     /** Ancestor for coordinate normalization and transform compensation. */
     ancestor: SharedElementNode | null;
+    /** Optional immutable endpoint captured while the source scene was visible. */
+    snapshot?: SharedElementSnapshotTarget;
   };
   /** High-level animation type (move, fade, fade-in, fade-out). */
   animation: SharedElementAnimation;
@@ -196,7 +209,10 @@ export class SharedElementTransition extends React.Component<
   SharedElementTransitionProps,
   StateType
 > {
-  static prepareNode(node: SharedElementNode | null): any {
+  static prepareNode(
+    node: SharedElementNode | null,
+    snapshot?: SharedElementSnapshotTarget
+  ): any {
     let nodeStyle: any = {};
     if (Platform.OS === "android" && node && node.parentInstance) {
       const child = React.Children.only(node.parentInstance.props.children);
@@ -214,13 +230,14 @@ export class SharedElementTransition extends React.Component<
         nodeStyle.borderColor = processColor(nodeStyle.borderColor);
       if (nodeStyle.color) nodeStyle.color = processColor(nodeStyle.color);
     }
-    return node
-      ? {
-          nodeHandle: node.nodeHandle,
-          isParent: node.isParent,
-          nodeStyle,
-        }
-      : undefined;
+    if (!node && !snapshot) return undefined;
+    return {
+      nodeHandle: node?.nodeHandle,
+      isParent: node?.isParent ?? false,
+      nodeStyle,
+      snapshotKey: snapshot?.key,
+      snapshotMode: snapshot?.mode,
+    };
   }
 
   static defaultProps = {
@@ -385,11 +402,14 @@ export class SharedElementTransition extends React.Component<
       <View style={StyleSheet.absoluteFill}>
         <SharedElementComponent
           startNode={{
-            node: SharedElementTransition.prepareNode(start.node),
+            node: SharedElementTransition.prepareNode(
+              start.node,
+              start.snapshot
+            ),
             ancestor: SharedElementTransition.prepareNode(start.ancestor),
           }}
           endNode={{
-            node: SharedElementTransition.prepareNode(end.node),
+            node: SharedElementTransition.prepareNode(end.node, end.snapshot),
             ancestor: SharedElementTransition.prepareNode(end.ancestor),
           }}
           style={StyleSheet.absoluteFill}

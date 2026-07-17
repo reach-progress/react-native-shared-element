@@ -49,6 +49,9 @@
   
   __weak UIView* _sourceView;
   RNSharedElementNodeResolvedSource* _resolvedSource;
+  BOOL _isSnapshot;
+  RNSharedElementStyle* _snapshotStyle;
+  RNSharedElementContent* _snapshotContent;
 }
 
 @synthesize reactTag = _reactTag;
@@ -65,6 +68,7 @@ NSArray* _imageResolvers;
   _reactTag = reactTag;
   _sourceView = view;
   _isParent = isParent;
+  _isSnapshot = NO;
   _refCount = 1;
   _hideRefCount = 0;
   _contentRequests = nil;
@@ -80,9 +84,131 @@ NSArray* _imageResolvers;
   return self;
 }
 
+- (instancetype)initWithSnapshot:(RNSharedElementSnapshot*)snapshot
+{
+  if ((self = [super init])) {
+    _reactTag = nil;
+    _sourceView = nil;
+    _isParent = NO;
+    _isSnapshot = YES;
+    _refCount = 1;
+    _hideRefCount = 0;
+    _contentRequests = nil;
+    _styleRequests = nil;
+    _displayLink = nil;
+    _resolvedSource = [RNSharedElementNodeResolvedSource sourceWithView:nil];
+    _snapshotStyle = [snapshot.style snapshotCopyWithVisibleLayout:snapshot.style.visibleLayout];
+    _snapshotContent = snapshot.content;
+  }
+  return self;
+}
+
 - (UIView*) view
 {
   return _resolvedSource ? _resolvedSource.view : nil;
+}
+
+- (BOOL)isSnapshot
+{
+  return _isSnapshot;
+}
+
+- (BOOL)isViewVisible:(UIView*)view visibleLayout:(CGRect*)visibleLayout
+{
+  if (view == nil || view.window == nil || view.hidden || view.alpha <= 0.01 || CGRectIsEmpty(view.bounds)) {
+    return NO;
+  }
+
+  CGRect layout = [view convertRect:view.bounds toView:nil];
+  CGRect visible = layout;
+  UIView* ancestor = view;
+  while (ancestor != nil) {
+    if (ancestor.hidden || ancestor.alpha <= 0.01) return NO;
+    if (ancestor != view && (ancestor.clipsToBounds || ancestor.layer.mask != nil)) {
+      CGRect ancestorLayout = [ancestor convertRect:ancestor.bounds toView:nil];
+      visible = CGRectIntersection(visible, ancestorLayout);
+      if (CGRectIsNull(visible) || CGRectIsEmpty(visible)) return NO;
+    }
+    ancestor = ancestor.superview;
+  }
+
+  UIWindow* window = view.window;
+  CGRect windowLayout = [window convertRect:window.bounds toView:nil];
+  visible = CGRectIntersection(visible, windowLayout);
+  if (CGRectIsNull(visible) || CGRectIsEmpty(visible)) return NO;
+
+  if (visibleLayout != nil) *visibleLayout = visible;
+  return YES;
+}
+
+- (UIImage*)snapshotImageForView:(UIView*)view
+{
+  if (view == nil || CGRectIsEmpty(view.bounds)) return nil;
+
+  CGFloat scale = view.window.screen.scale;
+  UIGraphicsBeginImageContextWithOptions(
+    view.bounds.size,
+    NO,
+    scale > 0 ? scale : UIScreen.mainScreen.scale
+  );
+  CGContextRef context = UIGraphicsGetCurrentContext();
+  BOOL drewHierarchy = [view drawViewHierarchyInRect:view.bounds afterScreenUpdates:NO];
+  if (!drewHierarchy && context != nil) {
+    [view.layer renderInContext:context];
+  }
+  UIImage* image = UIGraphicsGetImageFromCurrentImageContext();
+  UIGraphicsEndImageContext();
+  return image;
+}
+
+- (RNSharedElementSnapshot*)captureSnapshot
+{
+  if (_isSnapshot) {
+    return [[RNSharedElementSnapshot alloc]initWithStyle:_snapshotStyle content:_snapshotContent];
+  }
+
+  [self updateResolvedSource:YES];
+  UIView* view = _resolvedSource.view;
+  UIView* contentView = _resolvedSource.contentView;
+  CGRect visibleLayout = CGRectNull;
+  if (![self isViewVisible:view visibleLayout:&visibleLayout]) return nil;
+
+  RNSharedElementStyle* style = [[RNSharedElementStyle alloc]initWithView:view];
+  style.layout = [view convertRect:view.bounds toView:nil];
+  if ([RNSharedElementContent isKindOfImageView:contentView]) {
+    UIImageView* imageView = [RNSharedElementContent imageViewFromView:contentView];
+    style.contentMode = imageView.contentMode;
+  } else {
+    style.contentMode = view.contentMode;
+  }
+
+  RNSharedElementContent* content = nil;
+  if ([RNSharedElementContent isKindOfImageView:contentView]) {
+    UIImageView* imageView = [RNSharedElementContent imageViewFromView:contentView];
+    UIImage* image = imageView.image;
+    if (image == nil) return nil;
+    UIEdgeInsets imageInsets = UIEdgeInsetsZero;
+    if (contentView != view) {
+      CGRect frame = contentView.frame;
+      CGRect bounds = view.bounds;
+      imageInsets.left = frame.origin.x;
+      imageInsets.top = frame.origin.y;
+      imageInsets.right = bounds.size.width - frame.size.width - frame.origin.x;
+      imageInsets.bottom = bounds.size.height - frame.size.height - frame.origin.y;
+    }
+    content = [[RNSharedElementContent alloc]initWithData:image
+                                                     type:RNSharedElementContentTypeRawImage
+                                                   insets:imageInsets];
+  } else {
+    UIImage* image = [self snapshotImageForView:view];
+    if (image == nil) return nil;
+    content = [[RNSharedElementContent alloc]initWithData:image
+                                                     type:RNSharedElementContentTypeSnapshotImage
+                                                   insets:UIEdgeInsetsZero];
+  }
+
+  RNSharedElementStyle* snapshotStyle = [style snapshotCopyWithVisibleLayout:visibleLayout];
+  return [[RNSharedElementSnapshot alloc]initWithStyle:snapshotStyle content:content];
 }
 
 - (void) updateResolvedSource:(BOOL)noReset
@@ -215,7 +341,7 @@ NSArray* _imageResolvers;
       [_displayLink removeFromRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
       _displayLink = nil;
     }
-    [self updateResolvedSource:NO];
+    if (!_isSnapshot) [self updateResolvedSource:NO];
     if (_isParent && (_sourceView != nil)) {
       [self removeStyleObservers:_sourceView];
     }
@@ -244,6 +370,10 @@ NSArray* _imageResolvers;
 
 - (void) requestContent:(__weak id <RNSharedElementDelegate>) delegate
 {
+  if (_isSnapshot) {
+    [delegate didLoadContent:_snapshotContent node:self];
+    return;
+  }
   if (_contentCache != nil && ((CACurrentMediaTime() - _contentCacheTimeInterval) <= 0.3)) {
     [delegate didLoadContent:_contentCache node:self];
     return;
@@ -313,6 +443,10 @@ NSArray* _imageResolvers;
 
 - (void) requestStyle:(__weak id <RNSharedElementDelegate>) delegate
 {
+  if (_isSnapshot) {
+    [delegate didLoadStyle:_snapshotStyle node:self];
+    return;
+  }
   if (_styleCache != nil && ((CACurrentMediaTime() - _styleCacheTimeInterval) <= 0.3)) {
     [delegate didLoadStyle:_styleCache node:self];
     return;

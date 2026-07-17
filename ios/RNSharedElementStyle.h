@@ -24,8 +24,11 @@
 @property (nonatomic, assign) CGFloat shadowRadius;
 @property (nonatomic, assign) CGSize shadowOffset;
 @property (nonatomic, strong) UIColor *shadowColor;
+@property (nonatomic, assign) BOOL snapshot;
+@property (nonatomic, assign) CGRect visibleLayout;
 - (instancetype)init;
 - (instancetype)initWithView:(UIView*) view;
+- (RNSharedElementStyle*)snapshotCopyWithVisibleLayout:(CGRect)visibleLayout;
 
 + (NSString*) stringFromTransform:(CATransform3D) transform;
 + (CATransform3D) getAbsoluteViewTransform:(UIView*) view;

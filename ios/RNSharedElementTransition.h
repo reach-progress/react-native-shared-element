@@ -31,9 +31,11 @@
 @property (nonatomic, assign) NSInteger nativeGroupSize;
 @property (nonatomic, strong) RNSharedElementNode* startNode;
 @property (nonatomic, strong) RNSharedElementNode* startAncestor;
+@property (nonatomic, assign) BOOL startSnapshotMissing;
 @property (nonatomic, copy) RCTDirectEventBlock onMeasureNode;
 @property (nonatomic, strong) RNSharedElementNode* endNode;
 @property (nonatomic, strong) RNSharedElementNode* endAncestor;
+@property (nonatomic, assign) BOOL endSnapshotMissing;
 
 - (instancetype)initWithNodeManager:(RNSharedElementNodeManager*)nodeManager;
 

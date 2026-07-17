@@ -163,6 +163,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 
 - (BOOL)isTransitionDataReady
 {
+  if (_startSnapshotMissing || _endSnapshotMissing) return NO;
   if (!_initialLayoutPassCompleted) return NO;
   for (RNSharedElementTransitionItem* item in _items) {
     if (item.node == nil) continue;
@@ -203,6 +204,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 
 - (CGRect)currentLayoutForItem:(RNSharedElementTransitionItem*)item
 {
+  if (item.style.snapshot) return item.style.layout;
   UIView* view = item.style.view;
   if (view == nil || view.window == nil || CGRectIsEmpty(view.bounds)) {
     return CGRectNull;
@@ -367,10 +369,14 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     RNSharedElementRectsNearlyEqual(endItem.style.layout, currentEndLayout);
   startItem.style.layout = currentStartLayout;
   endItem.style.layout = currentEndLayout;
-  startItem.style.size = startItem.style.view.bounds.size;
-  endItem.style.size = endItem.style.view.bounds.size;
-  startItem.style.transform = [RNSharedElementStyle getAbsoluteViewTransform:startItem.style.view];
-  endItem.style.transform = [RNSharedElementStyle getAbsoluteViewTransform:endItem.style.view];
+  if (!startItem.style.snapshot) {
+    startItem.style.size = startItem.style.view.bounds.size;
+    startItem.style.transform = [RNSharedElementStyle getAbsoluteViewTransform:startItem.style.view];
+  }
+  if (!endItem.style.snapshot) {
+    endItem.style.size = endItem.style.view.bounds.size;
+    endItem.style.transform = [RNSharedElementStyle getAbsoluteViewTransform:endItem.style.view];
+  }
   if (!layoutsAreStable && _layoutValidationAttempts < RNSharedElementLayoutValidationMaxAttempts) {
     [self updateStyle];
     [self scheduleLayoutValidationIfNeeded];
@@ -614,6 +620,8 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     _layoutImageReady = NO;
     _layoutImageGeneration = 0;
     _layoutValidationAttempts = 0;
+    _startSnapshotMissing = NO;
+    _endSnapshotMissing = NO;
     self.userInteractionEnabled = NO;
     
     _outerStyleView = [[UIImageView alloc]init];
@@ -709,6 +717,22 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   _nativeAnimationPending = _nativeDriver;
   [self prepareLayoutImageIfNeeded];
   [self startNativeAnimationIfReady];
+}
+
+- (void)setStartSnapshotMissing:(BOOL)startSnapshotMissing
+{
+  if (_startSnapshotMissing == startSnapshotMissing) return;
+  _startSnapshotMissing = startSnapshotMissing;
+  [self invalidateLayoutImagePreparation];
+  [self updateNodeVisibility];
+}
+
+- (void)setEndSnapshotMissing:(BOOL)endSnapshotMissing
+{
+  if (_endSnapshotMissing == endSnapshotMissing) return;
+  _endSnapshotMissing = endSnapshotMissing;
+  [self invalidateLayoutImagePreparation];
+  [self updateNodeVisibility];
 }
 
 - (void)setStartAncestor:(RNSharedElementNode *)startNodeAncestor
@@ -862,7 +886,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   BOOL transitionReady = [self isTransitionReady];
   _outerStyleView.hidden = !transitionReady;
   for (RNSharedElementTransitionItem* item in _items) {
-    BOOL hidden = transitionReady && item.style != nil && item.content != nil;
+    BOOL hidden = transitionReady && !item.node.isSnapshot && item.style != nil && item.content != nil;
     if (hidden && (_animation == RNSharedElementAnimationFadeIn) && [item.name isEqualToString:@"startNode"]) hidden = NO;
     if (hidden && (_animation == RNSharedElementAnimationFadeOut) && [item.name isEqualToString:@"endNode"]) hidden = NO;
     item.hidden = hidden;

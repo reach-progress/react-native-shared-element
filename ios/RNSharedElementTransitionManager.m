@@ -206,11 +206,24 @@ RCT_EXPORT_MODULE(RNSharedElementTransition);
   return dispatch_get_main_queue();
 }
 
-- (RNSharedElementNode*) nodeFromJson:(NSDictionary*)json
+- (RNSharedElementNode*)nodeFromJson:(NSDictionary*)json
+            snapshotRequiredMissing:(BOOL*)snapshotRequiredMissing
 {
+  if (snapshotRequiredMissing != nil) *snapshotRequiredMissing = NO;
   if (json == nil) {
     return nil;
   }
+  NSString* snapshotKey = [json valueForKey:@"snapshotKey"];
+  NSString* snapshotMode = [json valueForKey:@"snapshotMode"];
+  if ([snapshotKey isKindOfClass:[NSString class]] && snapshotKey.length > 0) {
+    RNSharedElementNode* snapshotNode = [_nodeManager acquireSnapshot:snapshotKey];
+    if (snapshotNode != nil) return snapshotNode;
+    if ([snapshotMode isEqualToString:@"require"]) {
+      if (snapshotRequiredMissing != nil) *snapshotRequiredMissing = YES;
+      return nil;
+    }
+  }
+
   NSNumber* nodeHandle = [json valueForKey:@"nodeHandle"];
   NSNumber* isParent = [json valueForKey:@"isParent"];
   if ([nodeHandle isKindOfClass:[NSNumber class]]) {
@@ -220,6 +233,11 @@ RCT_EXPORT_MODULE(RNSharedElementTransition);
     return node;
   }
   return nil;
+}
+
+- (RNSharedElementNode*)nodeFromJson:(NSDictionary*)json
+{
+  return [self nodeFromJson:json snapshotRequiredMissing:nil];
 }
 
 - (void)onWaitProbeComplete:(RNSharedElementTransitionWaitProbe*)probe
@@ -273,8 +291,12 @@ RCT_CUSTOM_VIEW_PROPERTY(startNode, NSObject, RNSharedElementTransition)
 {
   NSDictionary* nodeJson = [json valueForKey:@"node"];
   NSDictionary* ancestorJson = [json valueForKey:@"ancestor"];
-  RNSharedElementNode* node = [self nodeFromJson:nodeJson];
-  RNSharedElementNode* ancestor = [self nodeFromJson:ancestorJson];
+  BOOL snapshotRequiredMissing = NO;
+  RNSharedElementNode* node = [self nodeFromJson:nodeJson snapshotRequiredMissing:&snapshotRequiredMissing];
+  RNSharedElementNode* ancestor = (snapshotRequiredMissing || node.isSnapshot)
+    ? nil
+    : [self nodeFromJson:ancestorJson];
+  view.startSnapshotMissing = snapshotRequiredMissing;
   view.startNode = node;
   view.startAncestor = ancestor;
 }
@@ -282,8 +304,12 @@ RCT_CUSTOM_VIEW_PROPERTY(endNode, NSObject, RNSharedElementTransition)
 {
   NSDictionary* nodeJson = [json valueForKey:@"node"];
   NSDictionary* ancestorJson = [json valueForKey:@"ancestor"];
-  RNSharedElementNode* node = [self nodeFromJson:nodeJson];
-  RNSharedElementNode* ancestor = [self nodeFromJson:ancestorJson];
+  BOOL snapshotRequiredMissing = NO;
+  RNSharedElementNode* node = [self nodeFromJson:nodeJson snapshotRequiredMissing:&snapshotRequiredMissing];
+  RNSharedElementNode* ancestor = (snapshotRequiredMissing || node.isSnapshot)
+    ? nil
+    : [self nodeFromJson:ancestorJson];
+  view.endSnapshotMissing = snapshotRequiredMissing;
   view.endNode = node;
   view.endAncestor = ancestor;
 }
@@ -314,8 +340,27 @@ RCT_REMAP_METHOD(waitForTransitionReady,
   NSDictionary* endNodeJson = [endItemMap isKindOfClass:[NSDictionary class]]
     ? [endItemMap valueForKey:@"node"]
     : nil;
-  RNSharedElementNode* startNode = [self nodeFromJson:startNodeJson];
-  RNSharedElementNode* endNode = [self nodeFromJson:endNodeJson];
+  BOOL startSnapshotMissing = NO;
+  BOOL endSnapshotMissing = NO;
+  RNSharedElementNode* startNode = [self nodeFromJson:startNodeJson snapshotRequiredMissing:&startSnapshotMissing];
+  RNSharedElementNode* endNode = [self nodeFromJson:endNodeJson snapshotRequiredMissing:&endSnapshotMissing];
+
+  if (startSnapshotMissing || endSnapshotMissing) {
+    if (startNode != nil) [_nodeManager release:startNode];
+    if (endNode != nil) [_nodeManager release:endNode];
+    resolve(@{
+      @"ready": @NO,
+      @"reason": @"snapshot-missing",
+      @"elapsedMs": @0,
+      @"hasStartNode": @(startNode != nil),
+      @"hasEndNode": @(endNode != nil),
+      @"startStyleReady": @NO,
+      @"startContentReady": @NO,
+      @"endStyleReady": @NO,
+      @"endContentReady": @NO,
+    });
+    return;
+  }
 
   __weak RNSharedElementTransitionManager* weakSelf = self;
   RNSharedElementTransitionWaitProbe* probe =
@@ -328,6 +373,42 @@ RCT_REMAP_METHOD(waitForTransitionReady,
                                                           }];
   [_waitProbes addObject:probe];
   [probe startWithTimeoutMs:[timeoutMs integerValue]];
+}
+
+RCT_REMAP_METHOD(captureSnapshots,
+                 routeKey:(NSString*)routeKey
+                 elements:(NSArray*)elements
+                 captureResolver:(RCTPromiseResolveBlock)resolve
+                 captureRejecter:(RCTPromiseRejectBlock)reject)
+{
+  NSString* prefix = [NSString stringWithFormat:@"%@:", routeKey ?: @""];
+  [_nodeManager clearSnapshotsWithPrefix:prefix];
+
+  NSInteger captured = 0;
+  for (NSDictionary* element in elements) {
+    if (![element isKindOfClass:[NSDictionary class]]) continue;
+    NSString* key = [element valueForKey:@"key"];
+    NSDictionary* nodeJson = [element valueForKey:@"node"];
+    RNSharedElementNode* node = [self nodeFromJson:nodeJson];
+    if (node == nil) continue;
+    if ([_nodeManager captureSnapshot:key node:node]) captured++;
+    [_nodeManager release:node];
+  }
+
+  resolve(@{
+    @"captured": @(captured),
+    @"requested": @(elements.count),
+  });
+}
+
+RCT_REMAP_METHOD(clearSnapshots,
+                 clearRouteKey:(NSString*)routeKey
+                 clearResolver:(RCTPromiseResolveBlock)resolve
+                 clearRejecter:(RCTPromiseRejectBlock)reject)
+{
+  NSString* prefix = [NSString stringWithFormat:@"%@:", routeKey ?: @""];
+  [_nodeManager clearSnapshotsWithPrefix:prefix];
+  resolve(@YES);
 }
 
 + (BOOL)requiresMainQueueSetup
