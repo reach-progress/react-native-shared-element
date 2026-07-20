@@ -10,6 +10,8 @@
 #import "RNSharedElementNodeManager.h"
 #import "RNSharedElementTypes.h"
 
+static NSString* const RNSharedElementLocalBuildTimestamp = @"2026-07-20T02:20:25Z";
+
 @class RNSharedElementTransitionWaitProbe;
 
 typedef void (^RNSharedElementTransitionWaitProbeComplete)(
@@ -193,6 +195,7 @@ RCT_EXPORT_MODULE(RNSharedElementTransition);
   if ((self = [super init])) {
     _nodeManager = [[RNSharedElementNodeManager alloc]init];
     _waitProbes = [[NSMutableSet alloc]init];
+    NSLog(@"[RNSE] local native build %@", RNSharedElementLocalBuildTimestamp);
   }
   return self;
 }
@@ -217,8 +220,33 @@ RCT_EXPORT_MODULE(RNSharedElementTransition);
   NSString* snapshotMode = [json valueForKey:@"snapshotMode"];
   if ([snapshotKey isKindOfClass:[NSString class]] && snapshotKey.length > 0) {
     RNSharedElementNode* snapshotNode = [_nodeManager acquireSnapshot:snapshotKey];
-    if (snapshotNode != nil) return snapshotNode;
+    if (snapshotNode != nil) {
+      NSLog(@"[RNSE] snapshot cache hit mode=%@ key=%@", snapshotMode, snapshotKey);
+      return snapshotNode;
+    }
+    NSLog(@"[RNSE] snapshot cache miss mode=%@ key=%@", snapshotMode, snapshotKey);
+
+    if ([snapshotMode isEqualToString:@"prefer"]) {
+      NSNumber* nodeHandle = [json valueForKey:@"nodeHandle"];
+      NSNumber* isParent = [json valueForKey:@"isParent"];
+      if ([nodeHandle isKindOfClass:[NSNumber class]]) {
+        UIView* sourceView = [self.bridge.uiManager viewForReactTag:nodeHandle];
+        RNSharedElementNode* liveNode =
+          [_nodeManager acquire:nodeHandle view:sourceView isParent:[isParent boolValue]];
+        BOOL captured = [_nodeManager captureSnapshot:snapshotKey node:liveNode];
+        [_nodeManager release:liveNode];
+        if (captured) {
+          NSLog(@"[RNSE] snapshot captured synchronously key=%@", snapshotKey);
+          return [_nodeManager acquireSnapshot:snapshotKey];
+        }
+      }
+
+      NSLog(@"[RNSE] snapshot unavailable; using fade key=%@", snapshotKey);
+      if (snapshotRequiredMissing != nil) *snapshotRequiredMissing = YES;
+      return nil;
+    }
     if ([snapshotMode isEqualToString:@"require"]) {
+      NSLog(@"[RNSE] required snapshot unavailable key=%@", snapshotKey);
       if (snapshotRequiredMissing != nil) *snapshotRequiredMissing = YES;
       return nil;
     }
@@ -394,6 +422,13 @@ RCT_REMAP_METHOD(captureSnapshots,
     if ([_nodeManager captureSnapshot:key node:node]) captured++;
     [_nodeManager release:node];
   }
+
+  NSLog(
+    @"[RNSE] snapshot batch route=%@ captured=%ld requested=%ld",
+    routeKey,
+    (long)captured,
+    (long)elements.count
+  );
 
   resolve(@{
     @"captured": @(captured),
