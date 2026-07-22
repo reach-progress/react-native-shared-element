@@ -45,7 +45,8 @@ type RNSharedElementTransitionNativeModule = {
   ) => Promise<NativeTransitionReadyResult>;
   captureSnapshots?: (
     routeKey: string,
-    elements: { key: string; node: NativeTransitionNode["node"] }[]
+    elements: { key: string; node: NativeTransitionNode["node"] }[],
+    preserveExisting: boolean
   ) => Promise<{ captured: number; requested: number }>;
   clearSnapshots?: (routeKey: string) => Promise<boolean>;
 };
@@ -53,6 +54,10 @@ type RNSharedElementTransitionNativeModule = {
 export type SharedElementSnapshotCapture = {
   key: string;
   node: SharedElementNode;
+};
+
+export type SharedElementSnapshotCaptureOptions = {
+  preserveExisting?: boolean;
 };
 
 export type SharedElementTransitionsReadyOptions = {
@@ -98,7 +103,8 @@ export function supportsSharedElementSnapshots(): boolean {
 
 export async function captureSharedElementSnapshots(
   routeKey: string,
-  elements: SharedElementSnapshotCapture[]
+  elements: SharedElementSnapshotCapture[],
+  options: SharedElementSnapshotCaptureOptions = {}
 ): Promise<{ captured: number; requested: number }> {
   const nativeModule = getNativeModule();
   if (!nativeModule?.captureSnapshots) {
@@ -109,7 +115,8 @@ export async function captureSharedElementSnapshots(
     elements.map(({ key, node }) => ({
       key,
       node: SharedElementTransition.prepareNode(node),
-    }))
+    })),
+    options.preserveExisting ?? false
   );
 }
 
@@ -185,6 +192,3 @@ export async function waitForSharedElementTransitionsReady(
     };
   }
 }
-
-export const __RNSE_BUILD_ID__ =
-  "rnse-native-only-2026-07-16-visible-endpoint-snapshots-v1";

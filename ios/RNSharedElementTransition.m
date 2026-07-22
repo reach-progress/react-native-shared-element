@@ -64,7 +64,6 @@ static UIImage* RNSharedElementResizeImage(UIImage* image, CGSize pixelSize)
 // Animated values do not update JS-side state. Fixed duration; eased to
 // feel closer to UIKit transitions.
 //
-// NOTE: This path intentionally avoids per-frame logging for perf.
 // Cubic ease-out to slow as the transition approaches the end.
 static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 {
@@ -79,6 +78,7 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
 @property (nonatomic, copy) NSString* groupId;
 @property (nonatomic, assign) NSInteger expectedCount;
 @property (nonatomic, strong) NSHashTable<RNSharedElementTransition*>* transitions;
+@property (nonatomic, strong) NSHashTable<RNSharedElementTransition*>* unavailableTransitions;
 @property (nonatomic, assign) BOOL started;
 @property (nonatomic, assign) BOOL timeoutScheduled;
 @property (nonatomic, assign) CFTimeInterval startTime;
@@ -92,6 +92,7 @@ static CGFloat RNSharedElementEaseOutCubic(CGFloat t)
     _groupId = [groupId copy];
     _expectedCount = expectedCount;
     _transitions = [NSHashTable weakObjectsHashTable];
+    _unavailableTransitions = [NSHashTable weakObjectsHashTable];
     _started = NO;
     _timeoutScheduled = NO;
     _startTime = 0;
@@ -111,11 +112,17 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   return RNSharedElementNativeAnimationGroups;
 }
 
+static NSInteger RNSharedElementEffectiveGroupSize(RNSharedElementNativeAnimationGroup* group)
+{
+  return MAX(0, group.expectedCount - (NSInteger)group.unavailableTransitions.allObjects.count);
+}
+
 @interface RNSharedElementTransition ()
 - (void)beginNativeAnimationAtTime:(CFTimeInterval)startTime;
 - (void)updateViewWithImage:(UIImageView*)view image:(UIImage*)image;
 - (unsigned long long)pixelCountForImage:(UIImage*)image;
 - (void)startNativeAnimationIfReady;
+- (void)registerUnavailableNativeAnimationIfNeeded;
 - (void)updateNodeVisibility;
 - (void)updateStyle;
 @end
@@ -147,6 +154,7 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   BOOL _layoutImageReady;
   NSUInteger _layoutImageGeneration;
   NSInteger _layoutValidationAttempts;
+  BOOL _nativeRegisteredUnavailable;
 }
 
 - (UIImage*)imageForContent:(RNSharedElementContent*)content
@@ -402,10 +410,14 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* groups = RNSharedElementGetNativeAnimationGroups();
   RNSharedElementNativeAnimationGroup* group = [groups objectForKey:_nativeRegisteredGroup];
   [group.transitions removeObject:self];
-  if (group != nil && group.transitions.allObjects.count == 0) {
+  [group.unavailableTransitions removeObject:self];
+  if (group != nil &&
+      group.transitions.allObjects.count == 0 &&
+      group.unavailableTransitions.allObjects.count == 0) {
     [groups removeObjectForKey:_nativeRegisteredGroup];
   }
   _nativeRegisteredGroup = nil;
+  _nativeRegisteredUnavailable = NO;
 }
 
 + (void)startNativeAnimationGroup:(RNSharedElementNativeAnimationGroup*)group
@@ -419,7 +431,6 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     maxDelaySeconds = MAX(maxDelaySeconds, transition->_nativeDelay / 1000.0);
   }
   group.startTime = CACurrentMediaTime() + maxDelaySeconds;
-
   for (RNSharedElementTransition* transition in transitions) {
     [transition beginNativeAnimationAtTime:group.startTime];
   }
@@ -429,6 +440,10 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
 {
   if (_nativeGroup.length == 0 || _nativeGroupSize <= 1) {
     return NO;
+  }
+
+  if (_nativeRegisteredUnavailable) {
+    [self removeFromNativeAnimationGroup];
   }
 
   NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* groups = RNSharedElementGetNativeAnimationGroups();
@@ -452,7 +467,8 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   }
 
   const NSUInteger readyCount = group.transitions.allObjects.count;
-  if (readyCount >= group.expectedCount) {
+  const NSInteger effectiveGroupSize = RNSharedElementEffectiveGroupSize(group);
+  if (readyCount >= effectiveGroupSize) {
     [RNSharedElementTransition startNativeAnimationGroup:group];
     return YES;
   }
@@ -470,11 +486,47 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   return YES;
 }
 
+- (void)registerUnavailableNativeAnimationIfNeeded
+{
+  if (_nativeGroup.length == 0 || _nativeGroupSize <= 1) return;
+  if (_nativeRegisteredUnavailable &&
+      [_nativeRegisteredGroup isEqualToString:_nativeGroup]) return;
+
+  [self removeFromNativeAnimationGroup];
+  NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* groups =
+    RNSharedElementGetNativeAnimationGroups();
+  RNSharedElementNativeAnimationGroup* group = [groups objectForKey:_nativeGroup];
+  if (group == nil) {
+    group = [[RNSharedElementNativeAnimationGroup alloc]
+      initWithGroupId:_nativeGroup
+      expectedCount:_nativeGroupSize];
+    [groups setObject:group forKey:_nativeGroup];
+  } else {
+    group.expectedCount = MAX(group.expectedCount, _nativeGroupSize);
+  }
+
+  [group.unavailableTransitions addObject:self];
+  _nativeRegisteredGroup = [_nativeGroup copy];
+  _nativeRegisteredUnavailable = YES;
+
+  if (!group.started &&
+      group.transitions.allObjects.count >= RNSharedElementEffectiveGroupSize(group)) {
+    [RNSharedElementTransition startNativeAnimationGroup:group];
+  }
+}
+
 - (void)startNativeAnimationNowIfReady
 {
   // Drive nodePosition natively once layout/content is ready.
   if (!_nativeDriver) return;
   if (!_nativeAnimationPending) return;
+  if (_nativePreparing) return;
+  if (_startSnapshotMissing || _endSnapshotMissing) {
+    // A missing offscreen snapshot falls back to the screen fade. Count it out
+    // of the group so the elements that can animate do not wait for a timeout.
+    [self registerUnavailableNativeAnimationIfNeeded];
+    return;
+  }
   if (![self isTransitionReady]) return;
   // A zero duration is treated as no-op to avoid a zero-length loop.
   if (_nativeDuration <= 0) {
@@ -614,7 +666,9 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
     _nativeAnimationPending = NO;
     _nativeAnimationStartScheduled = NO;
     _nativeRegisteredGroup = nil;
+    _nativeRegisteredUnavailable = NO;
     _nativeGroupSize = 0;
+    _nativePreparing = NO;
     _layoutValidationDisplayLink = nil;
     _layoutImagePreparing = NO;
     _layoutImageReady = NO;
@@ -725,6 +779,8 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   _startSnapshotMissing = startSnapshotMissing;
   [self invalidateLayoutImagePreparation];
   [self updateNodeVisibility];
+  _nativeAnimationPending = _nativeDriver;
+  [self startNativeAnimationIfReady];
 }
 
 - (void)setEndSnapshotMissing:(BOOL)endSnapshotMissing
@@ -733,6 +789,8 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   _endSnapshotMissing = endSnapshotMissing;
   [self invalidateLayoutImagePreparation];
   [self updateNodeVisibility];
+  _nativeAnimationPending = _nativeDriver;
+  [self startNativeAnimationIfReady];
 }
 
 - (void)setStartAncestor:(RNSharedElementNode *)startNodeAncestor
@@ -881,12 +939,29 @@ static NSMutableDictionary<NSString*, RNSharedElementNativeAnimationGroup*>* RNS
   }
 }
 
+- (void)setNativePreparing:(BOOL)nativePreparing
+{
+  if (_nativePreparing == nativePreparing) return;
+  _nativePreparing = nativePreparing;
+  [self updateNodeVisibility];
+  [self startNativeAnimationIfReady];
+}
+
 - (void)updateNodeVisibility
 {
+  if (_nativePreparing) {
+    // The close probe warms native content before navigation. It must not
+    // reveal its overlay or hide either screen while the user is still there.
+    _outerStyleView.hidden = YES;
+    for (RNSharedElementTransitionItem* item in _items) {
+      item.hidden = NO;
+    }
+    return;
+  }
   BOOL transitionReady = [self isTransitionReady];
   _outerStyleView.hidden = !transitionReady;
   for (RNSharedElementTransitionItem* item in _items) {
-    BOOL hidden = transitionReady && !item.node.isSnapshot && item.style != nil && item.content != nil;
+    BOOL hidden = transitionReady && item.style != nil && item.content != nil;
     if (hidden && (_animation == RNSharedElementAnimationFadeIn) && [item.name isEqualToString:@"startNode"]) hidden = NO;
     if (hidden && (_animation == RNSharedElementAnimationFadeOut) && [item.name isEqualToString:@"endNode"]) hidden = NO;
     item.hidden = hidden;

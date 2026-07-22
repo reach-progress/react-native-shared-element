@@ -15,6 +15,7 @@
 @property (nonatomic, readonly) BOOL isParent;
 @property (nonatomic, readonly) BOOL isSnapshot;
 @property (nonatomic, readonly) UIView* view;
+@property (nonatomic, strong) RNSharedElementNode* hideNode;
 @property (nonatomic) long refCount;
 @property (nonatomic) long hideRefCount;
 

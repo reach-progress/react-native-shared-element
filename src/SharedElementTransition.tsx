@@ -102,6 +102,8 @@ export type SharedElementTransitionProps = {
   nativeGroup?: string;
   /** Number of transitions expected in the native group. */
   nativeGroupSize?: number;
+  /** Resolve native content without showing or hiding transition endpoints. */
+  nativePreparing?: boolean;
   /** Enable debug overlays and boundary visuals. */
   debug?: boolean;
   /** Additional style applied to the transition view. */
@@ -392,6 +394,7 @@ export class SharedElementTransition extends React.Component<
       nativeTo,
       nativeGroup,
       nativeGroupSize,
+      nativePreparing,
       onMeasure,
       debug,
     } = this.props;
@@ -426,6 +429,7 @@ export class SharedElementTransition extends React.Component<
           nativeTo={nativeTo}
           nativeGroup={nativeGroup}
           nativeGroupSize={nativeGroupSize}
+          nativePreparing={nativePreparing}
           onMeasureNode={debug ? this.onMeasureNode : onMeasure}
         />
         {/*this.renderDebugOverlay()*/}

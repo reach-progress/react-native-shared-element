@@ -10,8 +10,6 @@
 #import "RNSharedElementNodeManager.h"
 #import "RNSharedElementTypes.h"
 
-static NSString* const RNSharedElementLocalBuildTimestamp = @"2026-07-20T02:20:25Z";
-
 @class RNSharedElementTransitionWaitProbe;
 
 typedef void (^RNSharedElementTransitionWaitProbeComplete)(
@@ -195,7 +193,6 @@ RCT_EXPORT_MODULE(RNSharedElementTransition);
   if ((self = [super init])) {
     _nodeManager = [[RNSharedElementNodeManager alloc]init];
     _waitProbes = [[NSMutableSet alloc]init];
-    NSLog(@"[RNSE] local native build %@", RNSharedElementLocalBuildTimestamp);
   }
   return self;
 }
@@ -216,44 +213,50 @@ RCT_EXPORT_MODULE(RNSharedElementTransition);
   if (json == nil) {
     return nil;
   }
+  NSNumber* nodeHandle = [json valueForKey:@"nodeHandle"];
+  NSNumber* isParent = [json valueForKey:@"isParent"];
   NSString* snapshotKey = [json valueForKey:@"snapshotKey"];
   NSString* snapshotMode = [json valueForKey:@"snapshotMode"];
   if ([snapshotKey isKindOfClass:[NSString class]] && snapshotKey.length > 0) {
     RNSharedElementNode* snapshotNode = [_nodeManager acquireSnapshot:snapshotKey];
     if (snapshotNode != nil) {
-      NSLog(@"[RNSE] snapshot cache hit mode=%@ key=%@", snapshotMode, snapshotKey);
+      if ([nodeHandle isKindOfClass:[NSNumber class]]) {
+        UIView* sourceView = [self.bridge.uiManager viewForReactTag:nodeHandle];
+        if (sourceView != nil) {
+          // Snapshot pixels stay immutable, but visibility still belongs to
+          // the live endpoint so the transition leaves a blank source slot.
+          snapshotNode.hideNode =
+            [_nodeManager acquire:nodeHandle view:sourceView isParent:[isParent boolValue]];
+        }
+      }
       return snapshotNode;
     }
-    NSLog(@"[RNSE] snapshot cache miss mode=%@ key=%@", snapshotMode, snapshotKey);
 
     if ([snapshotMode isEqualToString:@"prefer"]) {
-      NSNumber* nodeHandle = [json valueForKey:@"nodeHandle"];
-      NSNumber* isParent = [json valueForKey:@"isParent"];
       if ([nodeHandle isKindOfClass:[NSNumber class]]) {
         UIView* sourceView = [self.bridge.uiManager viewForReactTag:nodeHandle];
         RNSharedElementNode* liveNode =
           [_nodeManager acquire:nodeHandle view:sourceView isParent:[isParent boolValue]];
         BOOL captured = [_nodeManager captureSnapshot:snapshotKey node:liveNode];
-        [_nodeManager release:liveNode];
         if (captured) {
-          NSLog(@"[RNSE] snapshot captured synchronously key=%@", snapshotKey);
-          return [_nodeManager acquireSnapshot:snapshotKey];
+          RNSharedElementNode* capturedSnapshot = [_nodeManager acquireSnapshot:snapshotKey];
+          if (capturedSnapshot != nil) {
+            capturedSnapshot.hideNode = liveNode;
+            return capturedSnapshot;
+          }
         }
+        [_nodeManager release:liveNode];
       }
 
-      NSLog(@"[RNSE] snapshot unavailable; using fade key=%@", snapshotKey);
       if (snapshotRequiredMissing != nil) *snapshotRequiredMissing = YES;
       return nil;
     }
     if ([snapshotMode isEqualToString:@"require"]) {
-      NSLog(@"[RNSE] required snapshot unavailable key=%@", snapshotKey);
       if (snapshotRequiredMissing != nil) *snapshotRequiredMissing = YES;
       return nil;
     }
   }
 
-  NSNumber* nodeHandle = [json valueForKey:@"nodeHandle"];
-  NSNumber* isParent = [json valueForKey:@"isParent"];
   if ([nodeHandle isKindOfClass:[NSNumber class]]) {
     UIView *sourceView = [self.bridge.uiManager viewForReactTag:nodeHandle];
     RNSharedElementNode* node =
@@ -314,6 +317,11 @@ RCT_CUSTOM_VIEW_PROPERTY(nativeGroupSize, NSInteger, RNSharedElementTransition)
 {
   NSInteger value = [RCTConvert NSInteger:json];
   view.nativeGroupSize = value;
+}
+RCT_CUSTOM_VIEW_PROPERTY(nativePreparing, BOOL, RNSharedElementTransition)
+{
+  BOOL value = [RCTConvert BOOL:json];
+  view.nativePreparing = value;
 }
 RCT_CUSTOM_VIEW_PROPERTY(startNode, NSObject, RNSharedElementTransition)
 {
@@ -406,29 +414,30 @@ RCT_REMAP_METHOD(waitForTransitionReady,
 RCT_REMAP_METHOD(captureSnapshots,
                  routeKey:(NSString*)routeKey
                  elements:(NSArray*)elements
+                 preserveExisting:(BOOL)preserveExisting
                  captureResolver:(RCTPromiseResolveBlock)resolve
                  captureRejecter:(RCTPromiseRejectBlock)reject)
 {
   NSString* prefix = [NSString stringWithFormat:@"%@:", routeKey ?: @""];
-  [_nodeManager clearSnapshotsWithPrefix:prefix];
+  if (!preserveExisting) [_nodeManager clearSnapshotsWithPrefix:prefix];
 
   NSInteger captured = 0;
   for (NSDictionary* element in elements) {
     if (![element isKindOfClass:[NSDictionary class]]) continue;
     NSString* key = [element valueForKey:@"key"];
+    // The press handler captures its element before the scale feedback starts.
+    // Keep that geometry while filling the cache with the other visible nodes.
+    if (preserveExisting && [_nodeManager hasSnapshot:key]) {
+      captured++;
+      continue;
+    }
     NSDictionary* nodeJson = [element valueForKey:@"node"];
     RNSharedElementNode* node = [self nodeFromJson:nodeJson];
     if (node == nil) continue;
-    if ([_nodeManager captureSnapshot:key node:node]) captured++;
+    const BOOL didCapture = [_nodeManager captureSnapshot:key node:node];
+    if (didCapture) captured++;
     [_nodeManager release:node];
   }
-
-  NSLog(
-    @"[RNSE] snapshot batch route=%@ captured=%ld requested=%ld",
-    routeKey,
-    (long)captured,
-    (long)elements.count
-  );
 
   resolve(@{
     @"captured": @(captured),

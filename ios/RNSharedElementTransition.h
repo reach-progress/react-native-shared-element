@@ -29,6 +29,8 @@
 @property (nonatomic, assign) CGFloat nativeTo;
 @property (nonatomic, copy) NSString* nativeGroup;
 @property (nonatomic, assign) NSInteger nativeGroupSize;
+// Preview transitions resolve native content without changing what is visible.
+@property (nonatomic, assign) BOOL nativePreparing;
 @property (nonatomic, strong) RNSharedElementNode* startNode;
 @property (nonatomic, strong) RNSharedElementNode* startAncestor;
 @property (nonatomic, assign) BOOL startSnapshotMissing;

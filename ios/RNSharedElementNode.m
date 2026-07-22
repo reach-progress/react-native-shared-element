@@ -97,6 +97,7 @@ NSArray* _imageResolvers;
     _styleRequests = nil;
     _displayLink = nil;
     _resolvedSource = [RNSharedElementNodeResolvedSource sourceWithView:nil];
+    _hideNode = nil;
     _snapshotStyle = [snapshot.style snapshotCopyWithVisibleLayout:snapshot.style.visibleLayout];
     _snapshotContent = snapshot.content;
   }
@@ -354,6 +355,17 @@ NSArray* _imageResolvers;
 
 - (void) setHideRefCount:(long)refCount
 {
+  if (_isSnapshot) {
+    // A snapshot has no view of its own, so share visibility ownership with
+    // the live node and let overlapping transitions use its reference count.
+    const long delta = refCount - _hideRefCount;
+    _hideRefCount = refCount;
+    if (_hideNode != nil && delta != 0) {
+      _hideNode.hideRefCount = _hideNode.hideRefCount + delta;
+    }
+    return;
+  }
+
   _hideRefCount = refCount;
   if (_hideRefCount == 1) {
     if (_resolvedSource.view != nil) _resolvedSource.view.hidden = YES;

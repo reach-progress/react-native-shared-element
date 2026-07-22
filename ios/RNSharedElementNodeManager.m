@@ -29,6 +29,15 @@
   }
 }
 
+- (BOOL)hasSnapshot:(NSString*)key
+{
+  if (key.length == 0) return NO;
+  @synchronized(_snapshots)
+  {
+    return [_snapshots objectForKey:key] != nil;
+  }
+}
+
 - (BOOL)captureSnapshot:(NSString*)key node:(RNSharedElementNode*)node
 {
   if (key.length == 0 || node == nil) return NO;
@@ -74,17 +83,26 @@
 - (long) release:(RNSharedElementNode*) node
 {
   if (node == nil) return 0;
+  RNSharedElementNode* hideNode = nil;
+  long refCount = 0;
   @synchronized(_items)
   {
     node.refCount = node.refCount - 1;
+    refCount = node.refCount;
     if (node.refCount == 0) {
+      if (node.isSnapshot) {
+        node.hideRefCount = 0;
+        hideNode = node.hideNode;
+        node.hideNode = nil;
+      }
       RNSharedElementNode* dictItem = node.reactTag == nil ? nil : [_items objectForKey:node.reactTag];
       if (dictItem == node) {
         [_items removeObjectForKey:node.reactTag];
       }
     }
-    return node.refCount;
   }
+  if (hideNode != nil) [self release:hideNode];
+  return refCount;
 }
 
 @end
