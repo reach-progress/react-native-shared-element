@@ -5,7 +5,6 @@ import { SharedElementNode } from "./types";
 
 export type SharedElementProps = ViewProps & {
   children: React.ReactNode;
-  debugName?: string;
   onNode: (node: SharedElementNode | null) => void;
 };
 
@@ -44,7 +43,6 @@ export class SharedElement extends React.Component<SharedElementProps> {
   render() {
     const {
       onNode, //eslint-disable-line @typescript-eslint/no-unused-vars
-      debugName, //eslint-disable-line @typescript-eslint/no-unused-vars
       ...otherProps
     } = this.props;
     return <View ref={this.onSetRef} collapsable={false} {...otherProps} />;
