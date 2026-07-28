@@ -7,6 +7,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.graphics.Canvas;
+import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Color;
@@ -62,6 +63,8 @@ public class RNSharedElementTransition extends ViewGroup {
   private final ArrayList<RNSharedElementTransitionItem> mItems = new ArrayList<>();
   private final int[] mParentOffset = new int[2];
   private boolean mRequiresClipping = false;
+  private final Path mClipPath = new Path();
+  private boolean mHasRoundedClip = false;
   private final RNSharedElementView mStartView;
   private final RNSharedElementView mEndView;
   private int mInitialVisibleAncestorIndex = -1;
@@ -444,9 +447,16 @@ public class RNSharedElementTransition extends ViewGroup {
   @Override
   protected void dispatchDraw(Canvas canvas) {
     if (mRequiresClipping) {
+      int saveCount = canvas.save();
       canvas.clipRect(0, 0, getWidth(), getHeight());
+      if (mHasRoundedClip) {
+        canvas.clipPath(mClipPath);
+      }
+      super.dispatchDraw(canvas);
+      canvas.restoreToCount(saveCount);
+    } else {
+      super.dispatchDraw(canvas);
     }
-    super.dispatchDraw(canvas);
     if (!mHasDrawnRenderableFrame && hasRenderableSnapshot()) {
       mHasDrawnRenderableFrame = true;
       updateNodeVisibility();
@@ -649,6 +659,7 @@ public class RNSharedElementTransition extends ViewGroup {
     );
     setTranslationX(parentLayout.left);
     setTranslationY(parentLayout.top);
+    updateRoundedClip(interpolatedStyle, interpolatedLayout, parentLayout);
 
     // Determine opacity
     float startAlpha = 1.0f;
@@ -752,6 +763,43 @@ public class RNSharedElementTransition extends ViewGroup {
       endItem.setHasCalledOnMeasure(true);
       fireMeasureEvent("endNode", endItem, endLayout, endClippedLayout, endContentLayout);
     }
+  }
+
+  private void updateRoundedClip(
+          RNSharedElementStyle style,
+          RectF elementLayout,
+          RectF parentLayout
+  ) {
+    mHasRoundedClip = style.borderTopLeftRadius > 0
+            || style.borderTopRightRadius > 0
+            || style.borderBottomRightRadius > 0
+            || style.borderBottomLeftRadius > 0;
+    mClipPath.reset();
+    if (!mHasRoundedClip) return;
+
+    // Expo Image's mapped drawable can be larger than its cover container.
+    // Clip in the element's coordinate space so its interpolated corner radii
+    // follow the thumbnail instead of rounding the oversized drawable bounds.
+    RectF localElementLayout = new RectF(
+            elementLayout.left - parentLayout.left,
+            elementLayout.top - parentLayout.top,
+            elementLayout.right - parentLayout.left,
+            elementLayout.bottom - parentLayout.top
+    );
+    mClipPath.addRoundRect(
+            localElementLayout,
+            new float[]{
+                    style.borderTopLeftRadius,
+                    style.borderTopLeftRadius,
+                    style.borderTopRightRadius,
+                    style.borderTopRightRadius,
+                    style.borderBottomRightRadius,
+                    style.borderBottomRightRadius,
+                    style.borderBottomLeftRadius,
+                    style.borderBottomLeftRadius
+            },
+            Path.Direction.CW
+    );
   }
 
   private void updateNodeVisibility() {
