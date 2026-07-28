@@ -211,6 +211,14 @@ export class SharedElementTransition extends React.Component<
   SharedElementTransitionProps,
   StateType
 > {
+  private nativeTransitionRef: any;
+
+  startNativeAnimation = () => {
+    // The transition is already mounted and measured. Updating the native view
+    // directly avoids waiting for a slow Fabric render after navigation starts.
+    this.nativeTransitionRef?.setNativeProps({ nativeDriver: true });
+  };
+
   static prepareNode(
     node: SharedElementNode | null,
     snapshot?: SharedElementSnapshotTarget
@@ -404,6 +412,9 @@ export class SharedElementTransition extends React.Component<
     return (
       <View style={StyleSheet.absoluteFill}>
         <SharedElementComponent
+          ref={(ref: any) => {
+            this.nativeTransitionRef = ref;
+          }}
           startNode={{
             node: SharedElementTransition.prepareNode(
               start.node,

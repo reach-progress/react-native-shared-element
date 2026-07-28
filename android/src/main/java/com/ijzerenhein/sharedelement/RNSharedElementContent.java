@@ -1,6 +1,7 @@
 package com.ijzerenhein.sharedelement;
 
 import android.view.View;
+import android.graphics.Matrix;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.widget.ImageView;
@@ -13,6 +14,34 @@ import com.facebook.drawee.interfaces.DraweeController;
 class RNSharedElementContent {
   View view;
   RectF size;
+
+  private static RectF getImageViewLayout(RectF layout, ImageView imageView) {
+    Drawable drawable = imageView.getDrawable();
+    int viewWidth = imageView.getWidth();
+    int viewHeight = imageView.getHeight();
+    if (drawable == null || viewWidth <= 0 || viewHeight <= 0) {
+      return null;
+    }
+
+    int drawableWidth = drawable.getIntrinsicWidth();
+    int drawableHeight = drawable.getIntrinsicHeight();
+    if (drawableWidth <= 0 || drawableHeight <= 0) {
+      return null;
+    }
+
+    RectF mappedDrawable = new RectF(0, 0, drawableWidth, drawableHeight);
+    Matrix imageMatrix = imageView.getImageMatrix();
+    imageMatrix.mapRect(mappedDrawable);
+
+    float scaleX = layout.width() / (float) viewWidth;
+    float scaleY = layout.height() / (float) viewHeight;
+    return new RectF(
+            layout.left + (mappedDrawable.left * scaleX),
+            layout.top + (mappedDrawable.top * scaleY),
+            layout.left + (mappedDrawable.right * scaleX),
+            layout.top + (mappedDrawable.bottom * scaleY)
+    );
+  }
 
   static RectF getSize(View view) {
     if (view instanceof GenericDraweeView) {
@@ -77,5 +106,21 @@ class RNSharedElementContent {
             layout.right - horizontalInset,
             layout.bottom - verticalInset
     );
+  }
+
+  static RectF getLayout(RectF layout, RNSharedElementContent content, ScaleType scaleType, boolean reverse) {
+    // Expo Image uses a MATRIX scale type so it can apply contentPosition.
+    // Preserve that exact endpoint crop instead of rebuilding a centered one.
+    if (!reverse && content != null && content.view instanceof ImageView) {
+      ImageView imageView = (ImageView) content.view;
+      if (imageView.getScaleType() != ImageView.ScaleType.MATRIX) {
+        return getLayout(layout, content.size, scaleType, false);
+      }
+      RectF imageViewLayout = getImageViewLayout(layout, imageView);
+      if (imageViewLayout != null) {
+        return imageViewLayout;
+      }
+    }
+    return getLayout(layout, content != null ? content.size : null, scaleType, reverse);
   }
 }

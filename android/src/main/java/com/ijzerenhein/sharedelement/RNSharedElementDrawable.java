@@ -9,7 +9,6 @@ import android.graphics.Path;
 import android.graphics.Outline;
 import android.graphics.PixelFormat;
 import android.graphics.ColorFilter;
-import android.graphics.Matrix;
 import android.widget.ImageView;
 
 import com.facebook.react.views.image.ReactImageView;
@@ -274,25 +273,17 @@ class RNSharedElementDrawable extends Drawable {
 
   private void drawImageView(Canvas canvas) {
     ImageView imageView = (ImageView) mContent.view;
-    RNSharedElementStyle style = mStyle;
     Drawable drawable = imageView.getDrawable();
     if (drawable == null) return;
 
     // Backup current props
     Rect oldBounds = new Rect(drawable.getBounds());
 
-    // Configure drawable
-    int width = (int) mContent.size.right;
-    int height = (int) mContent.size.bottom;
-    drawable.setBounds(0, 0, width, height);
-    Matrix matrix = new Matrix();
-    style.scaleType.getTransform(matrix, getBounds(), width, height, 0.5f, 0.5f);
-
-    // Draw!
-    int saveCount = canvas.save();
-    canvas.concat(matrix);
+    // The transition lays this view out at the image's mapped content rect.
+    // Drawing into those bounds preserves Expo Image's contentPosition instead
+    // of applying a second, always-centered cover transform here.
+    drawable.setBounds(getBounds());
     drawable.draw(canvas);
-    canvas.restoreToCount(saveCount);
 
     // Restore props
     drawable.setBounds(oldBounds);
