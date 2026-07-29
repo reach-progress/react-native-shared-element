@@ -118,6 +118,13 @@ public class RNSharedElementTransitionManager extends SimpleViewManager<RNShared
     // See setNativeGroup.
   }
 
+  @ReactProp(name = "nativePreparing")
+  public void setNativePreparing(final RNSharedElementTransition view, final boolean nativePreparing) {
+    // Preparing resolves geometry and content without exposing the overlay or
+    // hiding either endpoint before navigation actually begins.
+    view.setNativePreparing(nativePreparing);
+  }
+
   private void setViewItem(final RNSharedElementTransition view, RNSharedElementTransition.Item item, final ReadableMap map) {
     if (map == null) {
       view.setItemNode(item, null);

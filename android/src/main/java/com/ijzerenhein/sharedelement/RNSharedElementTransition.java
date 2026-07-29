@@ -4,11 +4,13 @@ import java.util.ArrayList;
 
 import android.annotation.SuppressLint;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.Canvas;
+import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Color;
-import android.graphics.Matrix;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Choreographer;
@@ -26,6 +28,12 @@ import com.facebook.react.uimanager.events.Event;
 import com.facebook.react.uimanager.events.EventDispatcher;
 
 public class RNSharedElementTransition extends ViewGroup {
+  // Fabric can finish its visible surface transaction well after the source
+  // ImageView detaches on slower devices. Keep the popped endpoint hidden long
+  // enough that restoring its alpha cannot leak into a later rendered frame.
+  private static final long FADE_RELEASE_TIMEOUT_MS = 5000L;
+  private static final float ENDPOINT_FADE_FINISH_POSITION = 0.85f;
+
   // Native-timer animation is used for Fabric interop when JS-driven progress
   // does not update JS state. Uses Choreographer on the UI thread.
 
@@ -55,13 +63,18 @@ public class RNSharedElementTransition extends ViewGroup {
   private final ArrayList<RNSharedElementTransitionItem> mItems = new ArrayList<>();
   private final int[] mParentOffset = new int[2];
   private boolean mRequiresClipping = false;
+  private final Path mClipPath = new Path();
+  private boolean mHasRoundedClip = false;
   private final RNSharedElementView mStartView;
   private final RNSharedElementView mEndView;
   private int mInitialVisibleAncestorIndex = -1;
   private boolean mHasDrawnRenderableFrame = false;
+  private boolean mHoldStartHiddenOnRelease = false;
+  private boolean mHoldEndHiddenOnRelease = false;
 
   // Native-timer animation state for Fabric interop.
   private boolean mNativeDriver = false;
+  private boolean mNativePreparing = false;
   private float mNativeDuration = 0.0f;
   private float mNativeDelay = 0.0f;
   private float mNativeFrom = Float.NaN;
@@ -118,9 +131,25 @@ public class RNSharedElementTransition extends ViewGroup {
   void releaseData() {
     // Defensive cleanup to stop any pending frame callbacks.
     stopNativeAnimation();
-    for (RNSharedElementTransitionItem item : mItems) {
-      item.setNode(null);
+    Handler handler = new Handler(Looper.getMainLooper());
+    for (int index = 0; index < mItems.size(); index++) {
+      RNSharedElementTransitionItem item = mItems.get(index);
+      boolean holdHidden = item.getHidden()
+              && ((index == Item.START.getValue() && mHoldStartHiddenOnRelease)
+              || (index == Item.END.getValue() && mHoldEndHiddenOnRelease));
+      if (holdHidden) {
+        releaseHiddenItemAfterTeardown(handler, item);
+      } else {
+        item.setNode(null);
+      }
     }
+  }
+
+  private void releaseHiddenItemAfterTeardown(
+          Handler handler,
+          RNSharedElementTransitionItem item
+  ) {
+    handler.postDelayed(() -> item.setNode(null), FADE_RELEASE_TIMEOUT_MS);
   }
 
   RNSharedElementNodeManager getNodeManager() {
@@ -167,6 +196,32 @@ public class RNSharedElementTransition extends ViewGroup {
     return 1.0f - (inv * inv * inv);
   }
 
+  private static boolean hasVisibleArea(RectF layout) {
+    return (layout != null) && (layout.width() > 0.0f) && (layout.height() > 0.0f);
+  }
+
+  private static float getStartEndpointFadeProgress(float position) {
+    float progress = position / ENDPOINT_FADE_FINISH_POSITION;
+    return Math.max(0.0f, Math.min(1.0f, progress));
+  }
+
+  private static float getEndEndpointFadeProgress(float position) {
+    float startPosition = 1.0f - ENDPOINT_FADE_FINISH_POSITION;
+    float progress = (position - startPosition) / ENDPOINT_FADE_FINISH_POSITION;
+    return Math.max(0.0f, Math.min(1.0f, progress));
+  }
+
+  private void useNativeStartEndpoint(float nativeFrom) {
+    if (Float.isNaN(nativeFrom)) return;
+
+    mNodePosition = nativeFrom;
+    mInitialNodePositionSet = true;
+    // The animation tells us which scene is on screen. Using that endpoint
+    // avoids compensating the wrong card when both scene ancestors overlap.
+    mInitialVisibleAncestorIndex = nativeFrom >= 0.5f ? 1 : 0;
+    updateLayout();
+  }
+
   private boolean isItemRenderable(RNSharedElementTransitionItem item) {
     return (item.getStyle() != null) && (item.getContent() != null);
   }
@@ -192,6 +247,9 @@ public class RNSharedElementTransition extends ViewGroup {
   private void startNativeAnimationIfReady() {
     // Drive nodePosition natively when layout/content are ready.
     if (!mNativeDriver) {
+      return;
+    }
+    if (mNativePreparing) {
       return;
     }
     if (!mNativeAnimationPending) {
@@ -270,6 +328,24 @@ public class RNSharedElementTransition extends ViewGroup {
     // When enabled, we defer start until layout + nodes are ready.
     if (mNativeDriver != nativeDriver) {
       mNativeDriver = nativeDriver;
+      if (mNativeDriver) {
+        useNativeStartEndpoint(mNativeFrom);
+      }
+      mNativeAnimationPending = mNativeDriver;
+      startNativeAnimationIfReady();
+    }
+  }
+
+  void setNativePreparing(final boolean nativePreparing) {
+    if (mNativePreparing == nativePreparing) return;
+
+    mNativePreparing = nativePreparing;
+    updateNodeVisibility();
+    if (!mNativePreparing) {
+      // The preview and live transition reuse one native view. Reset teardown
+      // state here so only the real transition can keep an endpoint hidden.
+      mHoldStartHiddenOnRelease = false;
+      mHoldEndHiddenOnRelease = false;
       mNativeAnimationPending = mNativeDriver;
       startNativeAnimationIfReady();
     }
@@ -297,6 +373,7 @@ public class RNSharedElementTransition extends ViewGroup {
     // Any timing change should restart the pending native animation.
     if (mNativeFrom != nativeFrom) {
       mNativeFrom = nativeFrom;
+      useNativeStartEndpoint(nativeFrom);
       mNativeAnimationPending = mNativeDriver;
       startNativeAnimationIfReady();
     }
@@ -370,9 +447,16 @@ public class RNSharedElementTransition extends ViewGroup {
   @Override
   protected void dispatchDraw(Canvas canvas) {
     if (mRequiresClipping) {
+      int saveCount = canvas.save();
       canvas.clipRect(0, 0, getWidth(), getHeight());
+      if (mHasRoundedClip) {
+        canvas.clipPath(mClipPath);
+      }
+      super.dispatchDraw(canvas);
+      canvas.restoreToCount(saveCount);
+    } else {
+      super.dispatchDraw(canvas);
     }
-    super.dispatchDraw(canvas);
     if (!mHasDrawnRenderableFrame && hasRenderableSnapshot()) {
       mHasDrawnRenderableFrame = true;
       updateNodeVisibility();
@@ -470,7 +554,7 @@ public class RNSharedElementTransition extends ViewGroup {
     RectF startContentLayout = ((startStyle != null) && (startContent != null))
             ? RNSharedElementStyle.normalizeLayout(
                     startCompensate,
-                    RNSharedElementContent.getLayout(startLayout, startContent.size, startStyle.scaleType, false),
+                    RNSharedElementContent.getLayout(startLayout, startContent, startStyle.scaleType, false),
                     startStyle,
                     mParentOffset
             )
@@ -479,18 +563,47 @@ public class RNSharedElementTransition extends ViewGroup {
     RectF endContentLayout = ((endStyle != null) && (endContentForLayout != null))
             ? RNSharedElementStyle.normalizeLayout(
                     endCompensate,
-                    RNSharedElementContent.getLayout(endLayout, endContentForLayout.size, endStyle.scaleType, false),
+                    RNSharedElementContent.getLayout(endLayout, endContentForLayout, endStyle.scaleType, false),
                     endStyle,
                     mParentOffset
             )
             : RNSharedElementStyle.EMPTY_RECTF;
+
+    boolean startEndpointVisible = (startStyle != null)
+            && (startContent != null)
+            && hasVisibleArea(startClippedLayout);
+    boolean endEndpointVisible = (endStyle != null)
+            && (endContentForLayout != null)
+            && hasVisibleArea(endClippedLayout);
+    boolean fadeStartEndpoint = (mAnimation == RNSharedElementAnimation.MOVE)
+            && startEndpointVisible
+            && !endEndpointVisible;
+    boolean fadeEndEndpoint = (mAnimation == RNSharedElementAnimation.MOVE)
+            && !startEndpointVisible
+            && endEndpointVisible;
+    if (!mNativePreparing && mNativeDriver && !Float.isNaN(mNativeTo)) {
+      mHoldStartHiddenOnRelease = fadeStartEndpoint && mNativeTo >= 0.5f;
+      mHoldEndHiddenOnRelease = fadeEndEndpoint && mNativeTo < 0.5f;
+    }
 
     // Get interpolated layout
     RectF interpolatedLayout;
     RectF interpolatedContentLayout;
     RectF interpolatedClipInsets;
     RNSharedElementStyle interpolatedStyle;
-    if ((startStyle != null) && (endStyle != null)) {
+    if (fadeStartEndpoint) {
+      // A virtualized or fully clipped destination has no useful geometry.
+      // Keep the endpoint the user can see still and let it fade away.
+      interpolatedLayout = startLayout;
+      interpolatedContentLayout = startContentLayout;
+      interpolatedStyle = startStyle;
+      interpolatedClipInsets = startClipInsets;
+    } else if (fadeEndEndpoint) {
+      interpolatedLayout = endLayout;
+      interpolatedContentLayout = endContentLayout;
+      interpolatedStyle = endStyle;
+      interpolatedClipInsets = endClipInsets;
+    } else if ((startStyle != null) && (endStyle != null)) {
       interpolatedLayout = RNSharedElementStyle.getInterpolatedLayout(startLayout, endLayout, mNodePosition);
       interpolatedContentLayout = RNSharedElementStyle.getInterpolatedLayout(startContentLayout, endContentLayout, mNodePosition);
       interpolatedClipInsets = getInterpolatedClipInsets(interpolatedLayout, startClipInsets, startClippedLayout, endClipInsets, endClippedLayout, mNodePosition);
@@ -520,6 +633,12 @@ public class RNSharedElementTransition extends ViewGroup {
       parentLayout.right -= interpolatedClipInsets.right;
       parentLayout.bottom -= interpolatedClipInsets.bottom;
       mRequiresClipping = true;
+    } else if ((startContent != null && startContent.view instanceof android.widget.ImageView)
+            || (endContentForLayout != null && endContentForLayout.view instanceof android.widget.ImageView)) {
+      // ImageViews render at their mapped drawable rect, which can extend past
+      // a cover container. Clip that rect to the interpolated element bounds.
+      parentLayout = new RectF(interpolatedLayout);
+      mRequiresClipping = true;
     } else if (mResize == RNSharedElementResize.CLIP) {
       parentLayout = new RectF(interpolatedLayout);
       mRequiresClipping = true;
@@ -540,14 +659,25 @@ public class RNSharedElementTransition extends ViewGroup {
     );
     setTranslationX(parentLayout.left);
     setTranslationY(parentLayout.top);
+    updateRoundedClip(interpolatedStyle, interpolatedLayout, parentLayout);
 
     // Determine opacity
     float startAlpha = 1.0f;
     float endAlpha = 1.0f;
     switch (mAnimation) {
       case MOVE:
-        startAlpha = interpolatedStyle.opacity;
-        endAlpha = (startStyle == null) ? interpolatedStyle.opacity : 0.0f;
+        if (fadeStartEndpoint) {
+          float fadeProgress = getStartEndpointFadeProgress(mNodePosition);
+          startAlpha = interpolatedStyle.opacity * (1.0f - fadeProgress);
+          endAlpha = 0.0f;
+        } else if (fadeEndEndpoint) {
+          float fadeProgress = getEndEndpointFadeProgress(mNodePosition);
+          startAlpha = 0.0f;
+          endAlpha = interpolatedStyle.opacity * fadeProgress;
+        } else {
+          startAlpha = interpolatedStyle.opacity;
+          endAlpha = (startStyle == null) ? interpolatedStyle.opacity : 0.0f;
+        }
         break;
       case FADE:
         startAlpha = ((startStyle != null) ? startStyle.opacity : 1) * (1 - mNodePosition);
@@ -564,8 +694,10 @@ public class RNSharedElementTransition extends ViewGroup {
     }
 
     // Render the start view
-    if (mAnimation != RNSharedElementAnimation.FADE_IN) {
-      RectF startRenderLayout = mResize == RNSharedElementResize.CLIP
+    if ((mAnimation != RNSharedElementAnimation.FADE_IN) && !fadeEndEndpoint) {
+      boolean renderMappedImageContent = startContent != null
+              && startContent.view instanceof android.widget.ImageView;
+      RectF startRenderLayout = (mResize == RNSharedElementResize.CLIP || renderMappedImageContent)
               ? interpolatedContentLayout
               : interpolatedLayout;
       mStartView.updateViewAndDrawable(
@@ -585,9 +717,12 @@ public class RNSharedElementTransition extends ViewGroup {
     // Render the end view as well for the "cross-fade" animations
     if ((mAnimation == RNSharedElementAnimation.FADE)
             || (mAnimation == RNSharedElementAnimation.FADE_IN)
+            || fadeEndEndpoint
             || ((mAnimation == RNSharedElementAnimation.MOVE) && (startStyle == null))
     ) {
-      RectF endRenderLayout = mResize == RNSharedElementResize.CLIP
+      boolean renderMappedImageContent = endContentForLayout != null
+              && endContentForLayout.view instanceof android.widget.ImageView;
+      RectF endRenderLayout = (mResize == RNSharedElementResize.CLIP || renderMappedImageContent)
               ? interpolatedContentLayout
               : interpolatedLayout;
       mEndView.updateViewAndDrawable(
@@ -595,7 +730,7 @@ public class RNSharedElementTransition extends ViewGroup {
               parentLayout,
               mResize == RNSharedElementResize.CLIP ? endContentLayout : endLayout,
               endFrame,
-              endContent,
+              endContentForLayout,
               interpolatedStyle,
               endAlpha,
               mResize,
@@ -630,7 +765,53 @@ public class RNSharedElementTransition extends ViewGroup {
     }
   }
 
+  private void updateRoundedClip(
+          RNSharedElementStyle style,
+          RectF elementLayout,
+          RectF parentLayout
+  ) {
+    mHasRoundedClip = style.borderTopLeftRadius > 0
+            || style.borderTopRightRadius > 0
+            || style.borderBottomRightRadius > 0
+            || style.borderBottomLeftRadius > 0;
+    mClipPath.reset();
+    if (!mHasRoundedClip) return;
+
+    // Expo Image's mapped drawable can be larger than its cover container.
+    // Clip in the element's coordinate space so its interpolated corner radii
+    // follow the thumbnail instead of rounding the oversized drawable bounds.
+    RectF localElementLayout = new RectF(
+            elementLayout.left - parentLayout.left,
+            elementLayout.top - parentLayout.top,
+            elementLayout.right - parentLayout.left,
+            elementLayout.bottom - parentLayout.top
+    );
+    mClipPath.addRoundRect(
+            localElementLayout,
+            new float[]{
+                    style.borderTopLeftRadius,
+                    style.borderTopLeftRadius,
+                    style.borderTopRightRadius,
+                    style.borderTopRightRadius,
+                    style.borderBottomRightRadius,
+                    style.borderBottomRightRadius,
+                    style.borderBottomLeftRadius,
+                    style.borderBottomLeftRadius
+            },
+            Path.Direction.CW
+    );
+  }
+
   private void updateNodeVisibility() {
+    if (mNativePreparing) {
+      setVisibility(INVISIBLE);
+      for (RNSharedElementTransitionItem item : mItems) {
+        item.setHidden(false);
+      }
+      return;
+    }
+
+    setVisibility(VISIBLE);
     boolean shouldDeferHide = !mHasDrawnRenderableFrame;
     for (RNSharedElementTransitionItem item : mItems) {
       boolean hidden = mInitialLayoutPassCompleted
